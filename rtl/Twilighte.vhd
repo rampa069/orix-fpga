@@ -22,102 +22,70 @@ PA               : in std_logic_vector(7 downto 0);
 DB_IN            : in  std_logic_vector(7 downto 0);
 DB_OUT           : out std_logic_vector(7 downto 0);
 
-BANK0_ROMRAM     : out std_logic; 
-BANK1_ROMRAM     : out std_logic; 
-BANK2_ROMRAM     : out std_logic; 
-BANK3_ROMRAM     : out std_logic; 
-BANK4_ROMRAM     : out std_logic 
+BANK             : out std_logic_vector(4 downto 0);
+ISRAM            : out std_logic
 );
 
 end Twilighte;
 architecture EXTENSION of Twilighte is
 
-signal start   : std_logic;
-signal u16k    : std_logic;
-signal isRamOverlaySelected : std_logic;
+signal start                        : std_logic;
+signal u16k                         : std_logic;
+signal isRamOverlaySelected         : std_logic;
 
-signal write_314_detected   : std_logic;
-signal register_314         : std_logic_vector (7 downto 0);
+signal write_314_detected           : std_logic;
+signal register_314                 : std_logic_vector (7 downto 0);
 
 signal twilighte_register           : std_logic_vector (7 downto 0);
 signal twilighte_banking_register   : std_logic_vector (7 downto 0);
 signal nmiFromTwilighteBoard        : std_logic;
 
-
 begin
 
+
+ISRAM <= '1' when isRamOverlaySelected = '1' and  u16k='0' else '0';
+u16k  <= '0' when ADDR(7 downto 6 ) = "11" else '1';
+--q
 
 reset : process (nRESET, pa, u16k)
 begin
     if (nRESET = '0') then
-        BANK0_ROMRAM <= '0';
-        BANK1_ROMRAM <= '1';
-        BANK2_ROMRAM <= '1';
-        BANK3_ROMRAM <= '0';
-        BANK4_ROMRAM <= '0';
+	     BANK <= "00110";
         start <= '0';
         isRamOverlaySelected <= '1';
     else
         if (start = '0') then
-            BANK0_ROMRAM <= '0';
-            BANK1_ROMRAM <= '1';
-            BANK2_ROMRAM <= '1';      
-            BANK3_ROMRAM <= '0';
-            BANK4_ROMRAM <= '0';
+		      BANK <= "00110";
             isRamOverlaySelected <= '1';
             if pa(2 downto 0) = "111" then
                 start <= '1';
             end if;
         elsif (write_314_detected = '0') then
             if register_314(1) = '0' then  -- Activate RAM overlay
-                BANK0_ROMRAM <= '1';
-                BANK1_ROMRAM <= '1';
-                BANK2_ROMRAM <= '1';
-                BANK3_ROMRAM <= '0';
-                BANK4_ROMRAM <= '0';
+				    BANK <= "00111";
                 isRamOverlaySelected <= '0';
             else
-                BANK0_ROMRAM <= '1';
-                BANK1_ROMRAM <= '0';
-                BANK2_ROMRAM <= '1';
-                BANK3_ROMRAM <= '0';
-                BANK4_ROMRAM <= '0';
+				    BANK <= "00101";
                 isRamOverlaySelected <= '1';
             end if;
         else
             case pa(2 downto 0) is
                 when "111" =>
-                    BANK0_ROMRAM <= '0';
-                    BANK1_ROMRAM <= '1';
-                    BANK2_ROMRAM <= '1';
+					     BANK <= "--110";
                 when "110" =>
-                    BANK0_ROMRAM <= '1';
-                    BANK1_ROMRAM <= '0';
-                    BANK2_ROMRAM <= '1';
+					     BANK <= "--101";
                 when "101" =>
-                    BANK0_ROMRAM <= '0';
-                    BANK1_ROMRAM <= '0';
-                    BANK2_ROMRAM <= '1';
+					     BANK <= "--100";
                 when "100" =>
-                    BANK0_ROMRAM <= '1';
-                    BANK1_ROMRAM <= '1';
-                    BANK2_ROMRAM <= '0';
+					     BANK <= "--011";
                 when "011" =>
-                    BANK0_ROMRAM <= '0';
-                    BANK1_ROMRAM <= '1';
-                    BANK2_ROMRAM <= '0';
+						  BANK <= "--010";
                 when "010" =>
-                    BANK0_ROMRAM <= '1';
-                    BANK1_ROMRAM <= '0';
-                    BANK2_ROMRAM <= '0';
+					     BANK <= "--001";
                 when "001" =>
-                    BANK0_ROMRAM <= '0';
-                    BANK1_ROMRAM <= '0';
-                    BANK2_ROMRAM <= '0';
+					     BANK <= "--000";
                 when others =>
-                    BANK0_ROMRAM <= '1';
-                    BANK1_ROMRAM <= '1';
-                    BANK2_ROMRAM <= '1';
+					     BANK <= "--111";
                     isRamOverlaySelected <= '0';
             end case;
 
@@ -128,33 +96,24 @@ begin
             end if;
 
             if ((pa(2 downto 0) = "100") or (pa(2 downto 0) = "011") or (pa(2 downto 0) = "010") or (pa(2 downto 0) = "001")) then
-                BANK3_ROMRAM <= twilighte_banking_register(0);
-                BANK4_ROMRAM <= twilighte_banking_register(1);
+					 BANK(3) <= twilighte_banking_register(0);
+					 BANK(4) <= twilighte_banking_register(0);
                 if (twilighte_banking_register(2) = '1') then
                     case pa(2 downto 0) is
                         when "100" =>
-                            BANK0_ROMRAM <= '1';
-                            BANK1_ROMRAM <= '1';
-                            BANK2_ROMRAM <= '1';
+								    BANK <= "--111";
                         when "011" =>
-                            BANK0_ROMRAM <= '0';
-                            BANK1_ROMRAM <= '1';
-                            BANK2_ROMRAM <= '1';
+								    BANK <= "--110";
                         when "010" =>
-                            BANK0_ROMRAM <= '1';
-                            BANK1_ROMRAM <= '0';
-                            BANK2_ROMRAM <= '1';
+								    BANK <= "--101";
                         when "001" =>
-                            BANK0_ROMRAM <= '0';
-                            BANK1_ROMRAM <= '0';
-                            BANK2_ROMRAM <= '1';
+								    BANK <= "--100";
                         when others => null;
                     end case;
                 end if;
                 isRamOverlaySelected <= not twilighte_register(5);
             else
-                BANK3_ROMRAM <= '0';
-                BANK4_ROMRAM <= '0';
+				    BANK <= "00---";
             end if;
         end if;
     end if;
