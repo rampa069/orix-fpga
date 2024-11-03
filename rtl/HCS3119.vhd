@@ -45,6 +45,13 @@ ENTITY HCS3119 IS
       CS5n               : OUT std_logic;
       CS6n               : OUT std_logic;
 		
+		-- Twilighte Board
+		CS340n             : OUT std_logic;   -- CH376 activation
+		CS342n             : OUT std_logic;   -- Twilighte register
+		CS343n             : OUT std_logic;   -- Twilighte Banking
+ 		
+		
+		
 		--WD output
 		WD_CLK             : OUT std_logic;
 		WD_WEn             : OUT std_logic;
@@ -112,7 +119,11 @@ begin
 			CS318n     <= '0' WHEN (ADR>=x"18") and (ADR<=x"1B") AND IO = '0' ELSE '1';
 			CS31Cn     <= '0' WHEN (ADR>=x"1C") and (ADR<=x"1F") AND IO = '0' ELSE '1';
 			CS360n     <= '0' WHEN (ADR>=x"60") and (ADR<=x"71") AND IO = '0' ELSE '1'; 
-			
+		
+			-- Twiligte Board
+			CS340n     <= '0' WHEN (ADR>=x"40") and (ADR<=x"41") AND IO = '0' ELSE '1'; 
+			CS342n     <= '0' WHEN (ADR=x"42") AND IO = '0' ELSE '1'; 
+			CS343n     <= '0' WHEN (ADR=x"43") AND IO = '0' ELSE '1'; 
 			-- 
 			U16K <= '1' when A(15 downto 14) = "11" and MAPn_INT ='1'   else '0';
 			

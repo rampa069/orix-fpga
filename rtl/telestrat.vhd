@@ -42,9 +42,11 @@ entity telestrat is
 	 ram_oe            : out std_logic;
 	 ram_we            : out std_logic;
 
-	 rom_ad            : out std_logic_vector(15 downto 0);
+	 rom_ad            : out std_logic_vector(17 downto 0);
 	 rom_q             : in  std_logic_vector( 7 downto 0);
-	 bank4             : in std_logic;
+	 rom_rd            : out std_logic;
+	 
+    mode	             : in std_logic_vector(1 downto 0);
 	 
 	 cpu_ad            : buffer std_logic_vector(23 downto 0);
 	 cpu_do            : buffer std_logic_vector( 7 downto 0);
@@ -139,6 +141,9 @@ architecture RTL of telestrat is
 	SIGNAL CS318n : STD_LOGIC;
 	SIGNAL CS31Cn : STD_LOGIC;
 	SIGNAL CS320n : STD_LOGIC;
+	SIGNAL CS340n : STD_LOGIC;
+	SIGNAL CS342n : STD_LOGIC;
+	SIGNAL CS343n : STD_LOGIC;	
 	SIGNAL CS360n : STD_LOGIC;
 	SIGNAL CS0n   : STD_LOGIC;
 	SIGNAL CS1n   : STD_LOGIC;
@@ -173,6 +178,16 @@ architecture RTL of telestrat is
     signal psg_do             : std_logic_vector (7 downto 0);
     signal psg_bidir          : std_logic;
 	 signal ym_o_ioa           : std_logic_vector (7 downto 0);
+	 
+	 -- Twilighte board
+	 signal BANK0_ROMRAM   : std_logic;
+    signal BANK1_ROMRAM   : std_logic;
+    signal BANK2_ROMRAM   : std_logic;
+    signal BANK3_ROMRAM   : std_logic;
+    signal BANK4_ROMRAM   : std_logic;
+    signal TWL_NMI        : std_logic;
+    signal TWL_DO         : std_logic_vector(7 downto 0);
+	 
 
     -- ULA 1
     signal ula_phi2           : std_logic;
@@ -286,7 +301,7 @@ cpu_irq <=  via1_irq_n and via2_irq_n  and cont_irq and acia_irq;
 
 inst_cpu : entity work.T65
 	port map (
-		Mode    		=> "00",
+		Mode    		=> mode,
       Res_n   		=> RESETn,
       Enable  		=> ENA_1MHZ_N,
       Clk     		=> CLK_IN,
@@ -607,6 +622,30 @@ inst_ACIA : work.ACIA
 );
 
 
+Twilighte_inst : entity work.Twilighte
+port map (
+    CLK            => CLK_IN,
+    ADDR           => cpu_ad(15 downto 8),
+    R_W            => cpu_rw,
+    NMI            => TWL_NMI,
+    nRESET         => RESETn,
+	 
+    CS314n         => CS314n,
+    CS340n         => CS340n,  -- CH376 activation
+    CS342n         => CS342n,  -- Twilighte register
+    CS343n         => CS343n,  -- Twilighte Banking
+
+    PA             => via2_pa_out,
+    DB_IN          => CPU_DO,
+    DB_OUT         => TWL_DO,
+
+    BANK0_ROMRAM   => BANK0_ROMRAM,
+    BANK1_ROMRAM   => BANK1_ROMRAM,
+    BANK2_ROMRAM   => BANK2_ROMRAM,
+    BANK3_ROMRAM   => BANK3_ROMRAM,
+    BANK4_ROMRAM   => BANK4_ROMRAM
+);
+
 via1_pa_in <= (via1_pa_out and not via1_pa_out_oe_l) or (psg_do and via1_pa_out_oe_l);
 via1_pb_in(2 downto 0) <= via1_pb_out(2 downto 0);
 via1_pb_in(3) <= KEY_HIT;
@@ -629,17 +668,25 @@ joy_mux <= not joystick_0 when via2_pb_out(7) = '1' else
 via2_pb_in  <= not via2_pb_out(7) & via2_pb_out(6) & via2_pb_out(5) & joy_mux;
 via2_pa_in  <= not fire3_t1 & UART_RXD & not fire2_t1 & via2_pa_out(4) & '1' & via2_pa_out(2 downto 0);
 
-ROM_CSn <= CS6n and cS5n and CS4n and (CS3n or BANK4); 
-rom_ad <= not via2_pa_out (1 downto 0) & cpu_ad (13 downto 0);
-  
+ROM_CSn <=CS6n and cS5n and (CS4n or BANK4_ROMRAM) 
+     and (CS3n or BANK3_ROMRAM) and (CS2n or BANK2_ROMRAM) and (CS1n or BANK1_ROMRAM)
+	  and (CS0n or BANK4_ROMRAM);
+	  
+rom_ad <= ROM_CSn &  via2_pa_out (2 downto 0) & cpu_ad (13 downto 0);
+rom_rd <= cpu_rw and ula_phi2;  
 
 cpu_di <= VIA1_DO          when cs300n = '0' else 
           CONT_D_OUT       when cs314n = '0' else
           CONT_D_OUT       when cs318n = '0' else			 
-          FDC_DAL_OUT      when CS1793n = '0' else 
+          FDC_DAL_OUT      when CS1793n ='0' else 
 			 ACIA_DO          when CS31Cn = '0' else 
 			 VIA2_DO          when CS320n = '0' else
---			 SRAM_DO          when CS360n = '0' else -- placeholder for rtc
+			 TWL_DO           when CS340n = '0' else
+			 TWL_DO           when CS342n = '0' else
+			 TWL_DO           when CS343n = '0' else
+			 
+--			 TWL_DO          when CS360n = '0' else -- placeholder for rtc
+
           ROM_Q            when ROM_CSn = '0' else
 			 RAM_BANK4_DO     when CS3n = '0' else
 			 RAM_BANK3_DO     when CS2n = '0' else

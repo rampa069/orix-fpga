@@ -2,7 +2,6 @@
 //  Oric Telestrat
 //  rampa@encomix.org
 //
-//  Tape loader by JAson-A and Flandango.
 //============================================================================
 `default_nettype none
 
@@ -150,16 +149,10 @@ wire TAPE_SOUND=UART_RX;
 
 `include "build_id.v"
 localparam CONF_STR = {
-	"TeleStrat;;",
-	"S0U,DSKIMG,Mount Drive A:;",
-//	"S1U,DSKIMG,Mount Drive B:;",
-	"F2,ROM,Load Cartridge;",
-	"O1,BANK4,ROM,RAM;",
-	"-;",
-   "F1,TAP,Load TAP file;",
-	"OAB,Tape Audio,Mute,Low,High;",
-	"OC,Tape Input,File,ADC;",
-	"TD,Rewind;",
+	"ORIX;;",
+	"F0,ROMR64,Load Cartridge;",
+	"O23,Mode,6502,65c02,65C816;",
+	"O1,RAM,bram,sdram;",
 	"-;",
 	"O45,Scandoubler Fx,None,CRT 25%,CRT 50%,CRT 75%;",
 	"O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
@@ -171,9 +164,10 @@ localparam CONF_STR = {
 
 /////////////////////// CLOCKS ////////////////////////////
 
-wire        clk_sys;
-wire        clk_acia;
-wire        clk_hdmi;
+wire        clk_sys;   // 24 Mhz
+wire        clk_acia;  // 1 Mhz
+wire        clk_hdmi;  // 28Mhz
+wire        clk_ram;   // 96 Mhz
 wire        locked;
 
 
@@ -183,24 +177,15 @@ pll pll
 	.c0(clk_sys),
 	.c1(clk_acia),
 	.c2(clk_hdmi),
+	.c3(clk_ram),	
 	.locked(locked)
 );
 
 
 reg        reset = 0;
-reg [16:0] clr_addr = 0;
 
-always @(posedge clk_sys) begin
-
-	if(~&clr_addr) clr_addr <= clr_addr + 1'd1;
-	else reset <= 0;
-
-	if(status[0] | buttons[1]) begin
-		clr_addr <= 0;
-		reset <= 1;
-	end
-	
-end
+assign reset= status[0] || buttons[1]|| ~locked || ioctl_download ;
+assign LED=~reset;
 
 //////////////////// HPS ///////////////////////////////
 
@@ -315,7 +300,7 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(TOT_DISKS), .FEATURES(32'h0 | 
 );
 
 data_io data_io(
-	.clk_sys       ( clk_sys       ),
+	.clk_sys       ( clk_sys      ),
 	.SPI_SCK       ( SPI_SCK       ),
 	.SPI_SS2       ( SPI_SS2       ),
 	.SPI_DI        ( SPI_DI        ),
@@ -330,19 +315,40 @@ data_io data_io(
 
 //////////////////////// ROM CARTRIDGE ////////////
 
-wire[15:0] rom_address;
+wire[19:0] rom_address;
 wire[7:0]  rom_data;
-reg [1:0]  rom_pages;
+reg        rom_rd;
 
-wire cart_download = ioctl_index==2 && ioctl_download;
+
+assign SDRAM_CLK = ~clk_ram;
+
+wire [7:0] bram_data;
+wire [7:0] sdram_data;
+
+assign rom_data= status[1]? sdram_data : bram_data;
+
+sdram sdram
+(
+   .*,
+   .init(~locked),
+   .clk(clk_ram),
+
+   .wtbt(0),
+   .addr(ioctl_download ? ioctl_addr : rom_address),
+   .rd(rom_rd),
+   .dout(sdram_data),
+   .din(ioctl_dout),
+   .we(ioctl_download? ioctl_wr : 1'b0),
+   .ready()
+);
 
 cart  cart
 (
   .clock      (clk_sys), 
-  .address    (cart_download ? ioctl_addr: rom_address),
+  .address    (ioctl_download ? ioctl_addr: rom_address),
   .data       (ioctl_dout),
-  .wren       (cart_download? ioctl_wr : 1'b0),
-  .q          (rom_data)
+  .wren       (ioctl_download? ioctl_wr : 1'b0),
+  .q          (bram_data)
 );
 
 ///////////////////////////////////////////////////
@@ -367,14 +373,12 @@ wire        ram_we,ram_cs;
 
 reg   [7:0] ram[65536];
 always @(posedge clk_sys) begin
-	if(reset) ram[clr_addr[15:0]] <= '1;
-	else if(ram_we & ram_cs) ram[ram_ad] <= ram_d;
+	if(ram_we & ram_cs) ram[ram_ad] <= ram_d;
 end
 
 wire  [7:0] ram_q;
 always @(posedge clk_sys) ram_q <= ram[ram_ad];
 
-wire        led_disk;
 wire [23:0]  cpu_ad;
 wire [7:0]   cpu_do;
 
@@ -416,7 +420,9 @@ telestrat telestrat
 	
 	.rom_ad           (rom_address),
 	.rom_q            (rom_data),
-	.bank4            (status[1]),
+	.rom_rd           (rom_rd),
+	
+	.mode             (status[3:2]),
 	
 	
 	
@@ -427,20 +433,21 @@ telestrat telestrat
 	
 	.cpu_ad           (cpu_ad),
 	.cpu_do           (cpu_do),
-   .WD_REn           (WD_REn),
-	.WD_WEn           (WD_WEn), 
-   .WD_DRQ           (fdd_drq),
-	.WD_IRQ           (fdd_irq),
-	.WD_HLD           (fdd_hld),
-	.WD_CLK           (WD_CLK),
-	.WD_RESET         (WD_RESET),
-	.FDC_DAL_OUT      (fdc_dal_out),
-	.CS1793n          (CS1793n),
-	.SSEL             (SSEL),
-	.DS0              (DS0),
-	.DS1              (DS1),
-	.DS2              (DS2),
-	.DS3              (DS3),
+	
+//  .WD_REn           (WD_REn),
+//	.WD_WEn           (WD_WEn), 
+//   .WD_DRQ           (fdd_drq),
+//	.WD_IRQ           (fdd_irq),
+//	.WD_HLD           (fdd_hld),
+//	.WD_CLK           (WD_CLK),
+//	.WD_RESET         (WD_RESET),
+//	.FDC_DAL_OUT      (fdc_dal_out),
+//	.CS1793n          (CS1793n),
+//	.SSEL             (SSEL),
+//	.DS0              (DS0),
+//	.DS1              (DS1),
+//	.DS2              (DS2),
+//	.DS3              (DS3),
 	
 	.pll_locked       (locked),
 	.UART_TXD         (UART_TX),
@@ -454,16 +461,6 @@ telestrat telestrat
 /////////////////// VIDEO PROCESSING ////////////////////////////////
 
 
-
-//video_mixer #(.LINE_LENGTH(250), .HALF_DEPTH(1), .GAMMA(1)) video_mixer
-//(
-//	.*,
-//	.R({4{r}}),
-//	.G({4{g}}),
-//	.B({4{b}}),	
-//	.freeze_sync(),
-//	.hq2x(scale==1)
-//);
 
 	mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS),.USE_BLANKS(1), .BIG_OSD(BIG_OSD)) mist_video (	
 	.clk_sys      (clk_sys     ),
@@ -550,11 +547,6 @@ wire [15:0] psg_r;
 reg [12:0] psg_ab;
 reg [12:0] psg_ac;
 reg [12:0] psg_bc;
-wire [7:0] tapeAudio;
-
-
-assign tapeAudio = {|tapeVolume ? (tapeVolume == 2'd1 ? {1'b0,tape_in} : {tape_in,1'b0} ) : 2'b00,6'b00};
-
 
 
 always @ (clk_sys,psg_a,psg_b,psg_c) begin
@@ -568,8 +560,8 @@ assign psg_r = (stereo == 2'b00) ? {psg_out,2'b0} : (stereo == 2'b01) ? {psg_bc,
 
 wire [15:0] dac_in_l,dac_in_r;
 
-assign dac_in_l = psg_l + tapeAudio;
-assign dac_in_r = psg_r + tapeAudio;
+assign dac_in_l = psg_l;
+assign dac_in_r = psg_r;
 
 
 dac #(
@@ -625,150 +617,12 @@ spdif spdif (
 );
 `endif
 
-//////////////////////// TAPE LOADING ///////////////////////////
 
-wire [1:0] tapeVolume  = status[11:10];
-wire       tapeUseADC = status[12];
-wire       tapeRewind = status[13];
-wire       tape_in;
-wire       tape_out;
-
-wire tape_clk;
-always @(posedge clk_sys) begin
-	if (reset)
-    	tape_clk <= 1'b0;
-	else
-    	tape_clk <= ~tape_clk;	
-end
-
-wire casdout;
+wire tape_in;
+wire tape_out;
 wire cas_relay;
 
-wire        load_tape = ioctl_download && ioctl_index[4:0] == 1;
-reg  [15:0] tape_end;
-reg         tape_loaded = 1'b0;
-reg         ioctl_downlD;
-
-
-wire [15:0] tape_addr;
-wire [7:0]  tape_data;
-
-
-spram #(.address_width(16)) tapecache (
-  .clock(clk_sys),
-
-  .address(load_tape ? ioctl_addr: tape_addr),
-  .data(ioctl_dout),
-  .wren(ioctl_wr && load_tape),
-  .q(tape_data)
-);
-
-
-always @(posedge clk_sys) begin
- if (load_tape) tape_end <= ioctl_addr[15:0];
-end
-
-always @(posedge clk_sys) begin
-	ioctl_downlD <= load_tape;
-	if(~ioctl_downlD & load_tape) tape_loaded <= 1'b1;
-end
-
-cassette cassette (
-  .clk(clk_sys),
-  .reset(reset),
-  .rewind(tapeRewind | (load_tape)),
-  .en(cas_relay && tape_loaded && ~tapeUseADC), 
-  .tape_addr(tape_addr),
-  .tape_data(tape_data),
-
-  .tape_end(tape_end),
-  .data(casdout)
-);
-
-
-
-assign tape_in = tapeUseADC ? TAPE_SOUND : casdout;
-
-/////////////////////// FLOPPY DISK ///////////////////////////
-
-wire       wp = img_readonly;
-wire       CS1793n;
-wire       DS0,DS1,DS2,DS3;
-wire       SSEL;
-wire       WD_REn,WD_WEn;
-wire       WD_CLK;
-wire       WD_RESET;
-
-reg [3:0] fdc_sel;
-always @(posedge clk_sys) begin
-   case({DS3,DS2,DS1,DS0})
-	 4'b0001: fdc_sel=0;
-	 4'b0010: fdc_sel=1;
-	 4'b0100: fdc_sel=2;
-	 4'b1000: fdc_sel=3;
-	endcase
-end
-
-wire [7:0] fdc_dal_out;
-wire       fdd_prepare;
-wire       fdd_irq;
-wire       fdd_drq;
-wire       fdd_led;
-wire       fdd_hld;
-
-reg [TOT_DISKS-1:0] fdd_ready;
-reg [TOT_DISKS-1:0] old_mounted;
-
-genvar                fdd_i;
-generate
-  for (fdd_i = 0; fdd_i < TOT_DISKS; fdd_i++) begin : g_IM
-		
-	always @(posedge clk_sys) begin
-	   old_mounted[fdd_i] <= img_mounted[fdd_i];
-    	if(reset) fdd_ready[fdd_i] <= 1'b1;
-	     else if(~old_mounted[fdd_i] & img_mounted[fdd_i]) fdd_ready[fdd_i] <= |img_size;
-	end
- end
-endgenerate
-
-
-wd17xx #(.EDSK(1),.MODEL(3),.CLK_EN(24000),.TOT_DISKS(TOT_DISKS)) fdd1
-(
-	.clk_sys(clk_sys),
-	.ce     (WD_CLK),
-	.reset  (reset),
-	.io_en  (~CS1793n),
-	.rd     (~WD_REn),
-	.wr     (~WD_WEn),
-	.addr   (cpu_ad[1:0]),
-	.din    (cpu_do),
-	.dout   (fdc_dal_out),
-	.intrq  (fdd_irq),
-	.drq    (fdd_drq),
-
-	.img_mounted (img_mounted),
-	.img_size    (img_size[20:0]),
-	.sd_lba      (sd_lba),
-	.sd_rd       (sd_rd),
-	.sd_wr       (sd_wr),
-	.sd_ack      (sd_ack),
-	.sd_buff_addr(sd_buff_addr),
-	.sd_buff_dout(sd_buff_dout),
-	.sd_buff_din (sd_buff_din),
-	.sd_buff_wr (sd_buff_wr),
-
-	.wp        (wp),
-	.size_code (3'b101),
-	.layout    (0),
-	.side      (SSEL),
-	.ready     (1),//(fdd_ready),
-	.prepare   (fdd_prepare),
-	.busy      (fdd_led),
-	.hld       (),
-	.fdd_sel   (fdc_sel)
-);
-
-assign fdd_hld = img_mounted;
+assign tape_in = TAPE_SOUND;
 
 endmodule
 

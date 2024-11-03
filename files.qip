@@ -28,4 +28,5 @@ set_global_assignment -name QIP_FILE ../rtl/cart.qip
 set_global_assignment -name VERILOG_FILE ../rtl/cassette.v
 set_global_assignment -name VERILOG_FILE ../rtl/square_gen.v
 set_global_assignment -name VERILOG_FILE ../rtl/spram.v
+set_global_assignment -name SYSTEMVERILOG_FILE "../rtl/sdram.sv"
 set_global_assignment -name SYSTEMVERILOG_FILE "../TeleStrat.sv"
