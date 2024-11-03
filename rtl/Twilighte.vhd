@@ -43,9 +43,9 @@ signal nmiFromTwilighteBoard        : std_logic;
 begin
 
 
-ISRAM <= '1' when isRamOverlaySelected = '1' and  u16k='0' else '0';
+ISRAM <= not isRamOverlaySelected;
 u16k  <= '0' when ADDR(7 downto 6 ) = "11" else '1';
---q
+
 
 reset : process (nRESET, pa, u16k)
 begin

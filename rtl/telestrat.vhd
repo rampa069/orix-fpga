@@ -640,8 +640,8 @@ port map (
     DB_IN          => CPU_DO,
     DB_OUT         => TWL_DO,
 
-    BANK           => BANK
---	 ISRAM          => ROM_CSn
+    BANK           => BANK,
+	 ISRAM          => open
 );
 
 via1_pa_in <= (via1_pa_out and not via1_pa_out_oe_l) or (psg_do and via1_pa_out_oe_l);
@@ -666,11 +666,13 @@ joy_mux <= not joystick_0 when via2_pb_out(7) = '1' else
 via2_pb_in  <= not via2_pb_out(7) & via2_pb_out(6) & via2_pb_out(5) & joy_mux;
 via2_pa_in  <= not fire3_t1 & UART_RXD & not fire2_t1 & via2_pa_out(4) & '1' & via2_pa_out(2 downto 0);
 
-ROM_CSn <=CS6n and cS5n and CS4n ;
+--ROM_CSn <=CS6n and cS5n and CS4n ;
 
 --BANK <= BANK4_ROMRAM & BANK3_ROMRAM & BANK2_ROMRAM & BANK1_ROMRAM & BANK0_ROMRAM;
 --	  
 --rom_ad <= ROM_CSn &  via2_pa_out (2 downto 0) & cpu_ad (13 downto 0);
+
+ROM_CSn <= not ula_CSRAMn;
 rom_ad <= ROM_CSn & BANK & cpu_ad (13 downto 0);
 rom_rd <= cpu_rw and ula_phi2;  
 
