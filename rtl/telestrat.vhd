@@ -43,8 +43,10 @@ entity telestrat is
 	 ram_we            : out std_logic;
 
 	 rom_ad            : out std_logic_vector(19 downto 0);
-	 rom_q             : in  std_logic_vector( 7 downto 0);
+	 rom_d             : in  std_logic_vector( 7 downto 0);
+	 rom_q             : out  std_logic_vector( 7 downto 0);
 	 rom_rd            : out std_logic;
+	 rom_wr            : out std_logic;
 	 
     mode	             : in std_logic_vector(1 downto 0);
 	 
@@ -328,39 +330,39 @@ phi2    <= ula_PHI2;
 
 WD_RESET <= not RESETn;
 
-inst_ram1 : entity work.ram16k
-	port map (
-		clock			=> CLK_IN,
-		address		=> cpu_ad(13 downto 0),
-		data        => cpu_do,
-		wren        => not CS0n and not cpu_rw, 
-		q 			   => RAM_BANK1_DO
-);
-inst_ram2 : entity work.ram16k
-	port map (
-		clock			=> CLK_IN,
-		address		=> cpu_ad(13 downto 0),
-		data        => cpu_do,
-		wren        => not CS1n and not cpu_rw, 
-		q 			   => RAM_BANK2_DO
-);
-inst_ram3 : entity work.ram16k
-	port map (
-		clock			=> CLK_IN,
-		address		=> cpu_ad(13 downto 0),
-		data        => cpu_do,
-		wren        => not CS2n and not cpu_rw, 
-		q 			   => RAM_BANK3_DO
-);
-
-inst_ram4 : entity work.ram16k
-	port map (
-		clock			=> CLK_IN,
-		address		=> cpu_ad(13 downto 0),
-		data        => cpu_do,
-		wren        => not CS3n and not cpu_rw, 
-		q 			   => RAM_BANK4_DO
-);
+--inst_ram1 : entity work.ram16k
+--	port map (
+--		clock			=> CLK_IN,
+--		address		=> cpu_ad(13 downto 0),
+--		data        => cpu_do,
+--		wren        => not CS0n and not cpu_rw, 
+--		q 			   => RAM_BANK1_DO
+--);
+--inst_ram2 : entity work.ram16k
+--	port map (
+--		clock			=> CLK_IN,
+--		address		=> cpu_ad(13 downto 0),
+--		data        => cpu_do,
+--		wren        => not CS1n and not cpu_rw, 
+--		q 			   => RAM_BANK2_DO
+--);
+--inst_ram3 : entity work.ram16k
+--	port map (
+--		clock			=> CLK_IN,
+--		address		=> cpu_ad(13 downto 0),
+--		data        => cpu_do,
+--		wren        => not CS2n and not cpu_rw, 
+--		q 			   => RAM_BANK3_DO
+--);
+--
+--inst_ram4 : entity work.ram16k
+--	port map (
+--		clock			=> CLK_IN,
+--		address		=> cpu_ad(13 downto 0),
+--		data        => cpu_do,
+--		wren        => not CS3n and not cpu_rw, 
+--		q 			   => RAM_BANK4_DO
+--);
 
 via1_pa_out_oe_l <= not via1_pa_out_oe;
 via1_irq_n <= not via1_irq;
@@ -627,11 +629,12 @@ inst_ACIA : work.ACIA
 
 Twilighte_inst : entity work.Twilighte
 port map (
-    CLK            => CLK_IN,
-    ADDR           => cpu_ad(15 downto 8),
+    CLK            => ula_phi2,
+    ADDR           => cpu_ad(7 downto 0),
     R_W            => cpu_rw,
     NMI            => TWL_NMI,
     nRESET         => RESETn,
+	 nMAP           => ula_MAPn,
 	 
     CS314n         => CS314n,
     CS340n         => CS340n,  -- CH376 activation
@@ -643,7 +646,7 @@ port map (
     DB_OUT         => TWL_DO,
 
     BANK           => BANK,
-	 ISRAM          => open
+	 ISRAM          => ROM_CSn
 );
 
 DS1501 : entity work.DS1501 
@@ -684,9 +687,13 @@ via2_pa_in  <= not fire3_t1 & UART_RXD & not fire2_t1 & via2_pa_out(4) & '1' & v
 --	  
 --rom_ad <= ROM_CSn &  via2_pa_out (2 downto 0) & cpu_ad (13 downto 0);
 
-ROM_CSn <= not ula_CSRAMn;
+--ROM_CSn <= not ula_CSRAMn;
+
 rom_ad <= ROM_CSn & BANK & cpu_ad (13 downto 0);
-rom_rd <= cpu_rw and ula_phi2;  
+rom_rd <= cpu_rw and ula_phi2;
+rom_wr <= not cpu_rw and ula_phi2;  
+rom_q  <= cpu_do;
+
 
 cpu_di <= CPU_DO           when cpu_rw ='0' else
           VIA1_DO          when cs300n = '0' else 
@@ -702,13 +709,17 @@ cpu_di <= CPU_DO           when cpu_rw ='0' else
 			 
 			 RTC_DO           when CS360n = '0' else -- placeholder for rtc
 
-          ROM_Q            when ROM_CSn = '0' else
-			 RAM_BANK4_DO     when CS3n = '0' else
-			 RAM_BANK3_DO     when CS2n = '0' else
-			 RAM_BANK2_DO     when CS1n = '0' else
-			 RAM_BANK1_DO     when CS0n = '0' else
+--          ROM_Q            when ula_CSRAMn = '1' else
+--			 ROM_Q            when ROM_CSn    = '0' else
+
+--			 RAM_BANK4_DO     when CS3n = '0' else
+--			 RAM_BANK3_DO     when CS2n = '0' else
+--			 RAM_BANK2_DO     when CS1n = '0' else
+--			 RAM_BANK1_DO     when CS0n = '0' else
+
 			 SRAM_DO          when ula_CSRAMn = '0' else
-			 CPU_DI_LAST;
+			 ROM_D;
+--			 CPU_DI_LAST;
 
 --process (CLK_IN) begin
 --	if rising_edge(CLK_IN) then

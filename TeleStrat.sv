@@ -152,7 +152,7 @@ localparam CONF_STR = {
 	"ORIX;;",
 	"F0,ROMR64,Load Cartridge;",
 	"O23,Mode,6502,65c02,65C816;",
-	"O1,RAM,bram,sdram;",
+//	"O1,RAM,bram,sdram;",
 	"-;",
 	"O45,Scandoubler Fx,None,CRT 25%,CRT 50%,CRT 75%;",
 	"O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
@@ -185,7 +185,7 @@ pll pll
 reg        reset = 0;
 
 assign reset= status[0] || buttons[1]|| ~locked || ioctl_download ;
-assign LED=~reset;
+assign LED=~rom_address[19];
 
 //////////////////// HPS ///////////////////////////////
 
@@ -226,7 +226,7 @@ reg  [31:0] status_out;
 
 wire [21:0] gamma_bus;
 wire        freeze_sync;
-wire [64:0] rtc;
+wire [63:0] rtc;
 
 
 
@@ -282,6 +282,8 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(TOT_DISKS), .FEATURES(32'h0 | 
 	.joystick_0       ( joy0      ),
 	.joystick_1       ( joy1      ),
 	.status         	(status         	),
+	
+	.rtc              (rtc),
 	// SD CARD
    .sd_lba                      (sd_lba[0]     ),
 	.sd_rd                       (sd_rd         ),
@@ -317,15 +319,15 @@ data_io data_io(
 
 wire[19:0] rom_address;
 wire[7:0]  rom_data;
+wire[7:0]  rom_q;
 reg        rom_rd;
-
+reg        rom_wr;
+wire       isRAM = rom_address[19];
 
 assign SDRAM_CLK = ~clk_ram;
 
-wire [7:0] bram_data;
-wire [7:0] sdram_data;
 
-assign rom_data= status[1]? sdram_data : bram_data;
+
 
 sdram sdram
 (
@@ -336,20 +338,20 @@ sdram sdram
    .wtbt(0),
    .addr(ioctl_download ? ioctl_addr : rom_address),
    .rd(rom_rd),
-   .dout(sdram_data),
-   .din(ioctl_dout),
-   .we(ioctl_download? ioctl_wr : 1'b0),
+   .dout(rom_data),
+   .din (ioctl_download? ioctl_dout:rom_q),
+   .we  (ioctl_download? ioctl_wr : isRAM?rom_wr:0),
    .ready()
 );
 
-cart  cart
-(
-  .clock      (clk_sys), 
-  .address    (ioctl_download ? ioctl_addr: rom_address),
-  .data       (ioctl_dout),
-  .wren       (ioctl_download? ioctl_wr : 1'b0),
-  .q          (bram_data)
-);
+//cart  cart
+//(
+//  .clock      (clk_sys), 
+//  .address    (ioctl_download ? ioctl_addr: rom_address),
+//  .data       (ioctl_dout),
+//  .wren       (ioctl_download? ioctl_wr : 1'b0),
+//  .q          (bram_data)
+//);
 
 ///////////////////////////////////////////////////
 
@@ -409,7 +411,7 @@ telestrat telestrat
 	.K7_TAPEOUT       (tape_out),
 	.K7_REMOTE        (cas_relay),
 	
-//	.RTC              (rtc),
+	.RTC              (rtc),
 
 	.ram_ad           (ram_ad),
 	.ram_d            (ram_d),
@@ -419,8 +421,10 @@ telestrat telestrat
 	.ram_we           (ram_we),
 	
 	.rom_ad           (rom_address),
-	.rom_q            (rom_data),
+	.rom_q            (rom_q),
+	.rom_d            (rom_data),
 	.rom_rd           (rom_rd),
+	.rom_wr           (rom_wr),
 	
 	.mode             (status[3:2]),
 	
