@@ -22,7 +22,7 @@ entity telestrat is
     K7_TAPEIN         : in    std_logic;
     K7_TAPEOUT        : out   std_logic;
     K7_REMOTE         : out   std_logic;
---	 RTC               : in    std_logic_vector(63 downto 0);
+	 RTC               : in    std_logic_vector(63 downto 0);
 	 PSG_OUT           : out   unsigned(13 downto 0);
     PSG_OUT_A         : out   unsigned(11 downto 0);
     PSG_OUT_B         : out   unsigned(11 downto 0);
@@ -189,6 +189,8 @@ architecture RTL of telestrat is
     signal TWL_DO         : std_logic_vector(7 downto 0);
 	 signal BANK           : std_logic_vector(4 downto 0);
 	 
+    -- RTC
+	 signal RTC_DO         : std_logic_vector(7 downto 0);
 
     -- ULA 1
     signal ula_phi2           : std_logic;
@@ -644,6 +646,16 @@ port map (
 	 ISRAM          => open
 );
 
+DS1501 : entity work.DS1501 
+Port map(
+        CLK     => CLK_IN,
+        RESETn  => RESETn, 
+        ADDR    => cpu_ad(2 downto 0),
+        RTC     => RTC,
+        DATA_OUT=> RTC_DO
+);
+
+
 via1_pa_in <= (via1_pa_out and not via1_pa_out_oe_l) or (psg_do and via1_pa_out_oe_l);
 via1_pb_in(2 downto 0) <= via1_pb_out(2 downto 0);
 via1_pb_in(3) <= KEY_HIT;
@@ -676,17 +688,19 @@ ROM_CSn <= not ula_CSRAMn;
 rom_ad <= ROM_CSn & BANK & cpu_ad (13 downto 0);
 rom_rd <= cpu_rw and ula_phi2;  
 
-cpu_di <= VIA1_DO          when cs300n = '0' else 
+cpu_di <= CPU_DO           when cpu_rw ='0' else
+          VIA1_DO          when cs300n = '0' else 
           CONT_D_OUT       when cs314n = '0' else
           CONT_D_OUT       when cs318n = '0' else			 
           FDC_DAL_OUT      when CS1793n ='0' else 
 			 ACIA_DO          when CS31Cn = '0' else 
 			 VIA2_DO          when CS320n = '0' else
+			 
 			 TWL_DO           when CS340n = '0' else
 			 TWL_DO           when CS342n = '0' else
 			 TWL_DO           when CS343n = '0' else
 			 
---			 TWL_DO          when CS360n = '0' else -- placeholder for rtc
+			 RTC_DO           when CS360n = '0' else -- placeholder for rtc
 
           ROM_Q            when ROM_CSn = '0' else
 			 RAM_BANK4_DO     when CS3n = '0' else
@@ -696,12 +710,12 @@ cpu_di <= VIA1_DO          when cs300n = '0' else
 			 SRAM_DO          when ula_CSRAMn = '0' else
 			 CPU_DI_LAST;
 
-process (CLK_IN) begin
-	if rising_edge(CLK_IN) then
-		if cpu_rw = '1' and ula_phi2 = '1' then
-			cpu_di_last <= cpu_di;
-		end if;
-	end if;
-end process;
+--process (CLK_IN) begin
+--	if rising_edge(CLK_IN) then
+--		if cpu_rw = '1' and ula_phi2 = '1' then
+--			cpu_di_last <= cpu_di;
+--		end if;
+--	end if;
+--end process;
 
 end RTL;

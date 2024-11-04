@@ -121,7 +121,7 @@ begin
 			CS360n     <= '0' WHEN (ADR>=x"60") and (ADR<=x"71") AND IO = '0' ELSE '1'; 
 		
 			-- Twiligte Board
-			CS340n     <= '0' WHEN (ADR>=x"40") and (ADR<=x"41") AND IO = '0' ELSE '1'; 
+			CS340n     <= '0' WHEN (ADR(7 downto 5)) = "011" AND IO = '0' ELSE '1'; 
 			CS342n     <= '0' WHEN (ADR=x"42") AND IO = '0' ELSE '1'; 
 			CS343n     <= '0' WHEN (ADR=x"43") AND IO = '0' ELSE '1'; 
 			-- 
