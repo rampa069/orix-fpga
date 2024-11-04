@@ -19,7 +19,8 @@ architecture Behavioral of DS1501 is
     signal HOURS   : STD_LOGIC_VECTOR(7 downto 0);
     signal DAY     : STD_LOGIC_VECTOR(7 downto 0);
     signal MONTH   : STD_LOGIC_VECTOR(7 downto 0);
-    signal YEAR    : STD_LOGIC_VECTOR(15 downto 0);
+    signal YEAR    : STD_LOGIC_VECTOR(7 downto 0);
+	 signal CENTURY : STD_LOGIC_VECTOR(7 downto 0);
 
 begin
     process (CLK, RESETn)
@@ -31,6 +32,7 @@ begin
             DAY     <= (others => '0');
             MONTH   <= (others => '0');
             YEAR    <= (others => '0');
+            CENTURY <= (others => '0');
         elsif rising_edge(CLK) then
             -- Extract each time and date component from the input vector
             SECONDS <= RTC(7 downto 0);
@@ -38,7 +40,8 @@ begin
             HOURS   <= RTC(23 downto 16);
             DAY     <= RTC(31 downto 24);
             MONTH   <= RTC(39 downto 32);
-            YEAR    <= RTC(55 downto 40);
+            YEAR    <= RTC(47 downto 40);
+				CENTURY <= RTC(55 downto 48);
         end if;
     end process;
 
@@ -56,9 +59,9 @@ begin
             when "100" =>
                 DATA_OUT <= MONTH;
             when "101" =>
-                DATA_OUT <= YEAR(7 downto 0);
+                DATA_OUT <= YEAR;
             when "110" =>
-                DATA_OUT <= YEAR(15 downto 8);
+                DATA_OUT <= CENTURY;
             when others =>
                 DATA_OUT <= (others => '1');
         end case;
