@@ -18,6 +18,7 @@ architecture Behavioral of DS1501 is
     signal MINUTES : STD_LOGIC_VECTOR(7 downto 0);
     signal HOURS   : STD_LOGIC_VECTOR(7 downto 0);
     signal DAY     : STD_LOGIC_VECTOR(7 downto 0);
+	 signal DATE    : STD_LOGIC_VECTOR(7 downto 0);
     signal MONTH   : STD_LOGIC_VECTOR(7 downto 0);
     signal YEAR    : STD_LOGIC_VECTOR(7 downto 0);
 	 signal CENTURY : STD_LOGIC_VECTOR(7 downto 0);
@@ -30,6 +31,7 @@ begin
             MINUTES <= (others => '0');
             HOURS   <= (others => '0');
             DAY     <= (others => '0');
+				DATE    <= (others => '0');
             MONTH   <= (others => '0');
             YEAR    <= (others => '0');
             CENTURY <= (others => '0');
@@ -38,14 +40,15 @@ begin
             SECONDS <= RTC(7 downto 0);
             MINUTES <= RTC(15 downto 8);
             HOURS   <= RTC(23 downto 16);
-            DAY     <= RTC(31 downto 24);
+            DAY     <= RTC(55 downto 48);
+				DATE    <= RTC(31 downto 24);
             MONTH   <= RTC(39 downto 32);
             YEAR    <= RTC(47 downto 40);
-				CENTURY <= RTC(55 downto 48);
+				CENTURY <= RTC(63 downto 56);
         end if;
     end process;
 
-    process (ADDR, SECONDS, MINUTES, HOURS, DAY, MONTH, YEAR)
+    process (ADDR, SECONDS, MINUTES, HOURS, DAY, DATE, MONTH, YEAR, CENTURY)
     begin
         case ADDR is
             when "000" =>
@@ -57,11 +60,13 @@ begin
             when "011" =>
                 DATA_OUT <= DAY;
             when "100" =>
-                DATA_OUT <= MONTH;
+                DATA_OUT <= DATE;
             when "101" =>
-                DATA_OUT <= YEAR;
+                DATA_OUT <= MONTH;
             when "110" =>
-                DATA_OUT <= CENTURY;
+                DATA_OUT <= YEAR;
+            when "111" =>
+                DATA_OUT <= x"20"; --CENTURY;
             when others =>
                 DATA_OUT <= (others => '1');
         end case;

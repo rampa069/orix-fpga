@@ -416,6 +416,9 @@ set_global_assignment -name AUTO_MERGE_PLLS OFF
 
 set_global_assignment -name VERILOG_SHOW_LMF_MAPPING_MESSAGES OFF
 set_global_assignment -name VERILOG_MACRO "USE_CLOCK_50=1"
+set_global_assignment -name VERILOG_FILE ../rtl/65f02/cpu_65c02.v
+set_global_assignment -name VERILOG_FILE ../rtl/65f02/ALU.v
+set_global_assignment -name QIP_FILE ../rtl/65C816/65C816.qip
 set_global_assignment -name QIP_FILE "../mist-modules/mist.qip"
 set_global_assignment -name QIP_FILE ../files.qip
 set_global_assignment -name QIP_FILE pll.qip

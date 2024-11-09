@@ -226,6 +226,13 @@ architecture RTL of telestrat is
 	 signal swnmi           	: std_logic;
 	 signal swrst              : std_logic;
 	 signal joy_mux            : std_logic_vector(4 downto 0);
+
+	 signal CPU1_DO            : std_logic_vector(7 downto 0);
+	 signal CPU2_DO            : std_logic_vector(7 downto 0);
+	 signal CPU1_RW           	: std_logic;
+	 signal CPU2_RW           	: std_logic;
+	 signal CPU1_AD            : std_logic_vector(23 downto 0);
+	 signal CPU2_AD            : std_logic_vector(15 downto 0);
 	 
 	 
 		 
@@ -300,11 +307,13 @@ COMPONENT oric_ula is
   );
 end COMPONENT;
 
+
 begin
 
 cpu_irq <=  via1_irq_n and via2_irq_n  and cont_irq and acia_irq;
 
-inst_cpu : entity work.T65
+
+inst_cpu1 : entity work.T65
 	port map (
 		Mode    		=> mode,
       Res_n   		=> RESETn,
@@ -502,6 +511,8 @@ HCS3119: work.HCS3119
 			 CS318n    => CS318n,
 			 CS31Cn    => CS31Cn,
           CS320n    => CS320n,
+			 CS342n    => CS342n,
+			 CS343n    => CS343n,
 			 CS360n    => CS360n,
 			 CS1793n   => CS1793n,
           CS0n      => CS0n,
@@ -629,10 +640,8 @@ inst_ACIA : work.ACIA
 
 Twilighte_inst : entity work.Twilighte
 port map (
-    CLK            => ula_phi2,
-    ADDR           => cpu_ad(7 downto 0),
+    CLK            => CLK_IN,
     R_W            => cpu_rw,
-    NMI            => TWL_NMI,
     nRESET         => RESETn,
 	 nMAP           => ula_MAPn,
 	 
@@ -689,7 +698,7 @@ via2_pa_in  <= not fire3_t1 & UART_RXD & not fire2_t1 & via2_pa_out(4) & '1' & v
 
 --ROM_CSn <= not ula_CSRAMn;
 
-rom_ad <= ROM_CSn & BANK & cpu_ad (13 downto 0);
+rom_ad <= ROM_CSn & bank & cpu_ad (13 downto 0);
 rom_rd <= cpu_rw and ula_phi2;
 rom_wr <= not cpu_rw and ula_phi2;  
 rom_q  <= cpu_do;
@@ -697,26 +706,17 @@ rom_q  <= cpu_do;
 
 cpu_di <= CPU_DO           when cpu_rw ='0' else
           VIA1_DO          when cs300n = '0' else 
-          CONT_D_OUT       when cs314n = '0' else
-          CONT_D_OUT       when cs318n = '0' else			 
-          FDC_DAL_OUT      when CS1793n ='0' else 
+          --CONT_D_OUT       when cs314n = '0' else
+          --CONT_D_OUT       when cs318n = '0' else			 
+          --FDC_DAL_OUT      when CS1793n ='0' else 
 			 ACIA_DO          when CS31Cn = '0' else 
 			 VIA2_DO          when CS320n = '0' else
 			 
-			 TWL_DO           when CS340n = '0' else
+--			 TWL_DO           when CS340n = '0' else
 			 TWL_DO           when CS342n = '0' else
 			 TWL_DO           when CS343n = '0' else
 			 
 			 RTC_DO           when CS360n = '0' else -- placeholder for rtc
-
---          ROM_Q            when ula_CSRAMn = '1' else
---			 ROM_Q            when ROM_CSn    = '0' else
-
---			 RAM_BANK4_DO     when CS3n = '0' else
---			 RAM_BANK3_DO     when CS2n = '0' else
---			 RAM_BANK2_DO     when CS1n = '0' else
---			 RAM_BANK1_DO     when CS0n = '0' else
-
 			 SRAM_DO          when ula_CSRAMn = '0' else
 			 ROM_D;
 --			 CPU_DI_LAST;

@@ -324,7 +324,7 @@ reg        rom_rd;
 reg        rom_wr;
 wire       isRAM = rom_address[19];
 
-assign SDRAM_CLK = ~clk_ram;
+assign SDRAM_CLK = clk_ram; //~clk_ram;
 
 
 
