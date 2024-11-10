@@ -324,9 +324,11 @@ reg        rom_rd;
 reg        rom_wr;
 wire       isRAM = rom_address[19];
 
-assign SDRAM_CLK = clk_ram; //~clk_ram;
-
-
+`ifdef QMTECH
+assign SDRAM_CLK = clk_ram;
+`else
+assign SDRAM_CLK = ~clk_ram;
+`endif
 
 
 sdram sdram
