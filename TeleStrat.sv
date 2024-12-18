@@ -79,6 +79,16 @@ module guest_top
 	output        SDRAM2_CKE,
 `endif
 
+`ifdef USE_EXTBUS
+  inout  [7:0]  CH_D ,
+  output        CH_RD,
+  output        CH_WR,
+  output        CH_A0,
+  output        CH_CS,
+`endif
+
+
+
 	output        AUDIO_L,
 	output        AUDIO_R,
 `ifdef I2S_AUDIO
@@ -185,7 +195,7 @@ pll pll
 reg        reset = 0;
 
 assign reset= status[0] || buttons[1]|| ~locked || ioctl_download ;
-assign LED=~rom_address[19];
+//assign LED=~rom_address[19];
 
 //////////////////// HPS ///////////////////////////////
 
@@ -225,7 +235,7 @@ reg         status_set;
 reg  [31:0] status_out;
 
 wire [21:0] gamma_bus;
-wire        freeze_sync;
+wire        no_csync;
 wire [63:0] rtc;
 
 
@@ -284,6 +294,7 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(TOT_DISKS), .FEATURES(32'h0 | 
 	.status         	(status         	),
 	
 	.rtc              (rtc),
+	.no_csync         (no_csync         ),
 	// SD CARD
    .sd_lba                      (sd_lba[0]     ),
 	.sd_rd                       (sd_rd         ),
@@ -324,11 +335,33 @@ reg        rom_rd;
 reg        rom_wr;
 wire       isRAM = rom_address[19];
 
-`ifdef QMTECH
-assign SDRAM_CLK = clk_ram;
-`else
-assign SDRAM_CLK = ~clk_ram;
-`endif
+
+altddio_out
+#(
+        .extend_oe_disable("OFF"),
+        .intended_device_family("Cyclone 10 LP"),
+        .invert_output("OFF"),
+        .lpm_hint("UNUSED"),
+        .lpm_type("altddio_out"),
+        .oe_reg("UNREGISTERED"),
+        .power_up_high("OFF"),
+        .width(1)
+)
+
+
+sdramclk_ddr
+(
+        .datain_h(1'b0),
+        .datain_l(1'b1),
+        .outclock(clk_ram),
+        .dataout(SDRAM_CLK),
+        .aclr(1'b0),
+        .aset(1'b0),
+        .oe(1'b1),
+        .outclocken(1'b1),
+        .sclr(1'b0),
+        .sset(1'b0)
+);
 
 
 sdram sdram
@@ -346,14 +379,6 @@ sdram sdram
    .ready()
 );
 
-//cart  cart
-//(
-//  .clock      (clk_sys), 
-//  .address    (ioctl_download ? ioctl_addr: rom_address),
-//  .data       (ioctl_dout),
-//  .wren       (ioctl_download? ioctl_wr : 1'b0),
-//  .q          (bram_data)
-//);
 
 ///////////////////////////////////////////////////
 
@@ -385,6 +410,8 @@ always @(posedge clk_sys) ram_q <= ram[ram_ad];
 
 wire [23:0]  cpu_ad;
 wire [7:0]   cpu_do;
+
+//assign CH_CS=0;
 
 telestrat telestrat
 (
@@ -429,8 +456,15 @@ telestrat telestrat
 	.rom_wr           (rom_wr),
 	
 	.mode             (status[3:2]),
-	
-	
+	.debug            (LED),
+
+`ifdef USE_EXTBUS
+	.ch_d             (CH_D),
+   .ch_cs            (CH_CS),	
+   .ch_a0            (CH_A0),	
+   .ch_rd            (CH_RD),	
+   .ch_wr            (CH_WR),	
+`endif
 	
 	.joystick_0       (joy_t0),
 	.joystick_1       (joy_t1),
@@ -466,34 +500,55 @@ telestrat telestrat
 
 /////////////////// VIDEO PROCESSING ////////////////////////////////
 
+mist_dual_video 
+   #(.COLOR_DEPTH(1),
+	.SD_HCNT_WIDTH(11),
+	.OUT_COLOR_DEPTH(VGA_BITS),
+	.USE_BLANKS(1'b1),
+	.BIG_OSD(BIG_OSD)
+	)
+mist_video
+(
+	.clk_sys        ( clk_hdmi         ),
+	.SPI_SCK        ( SPI_SCK          ),
+	.SPI_SS3        ( SPI_SS3          ),
+	.SPI_DI         ( SPI_DI           ),
+	.R              ( r                ),
+	.G              ( g                ),
+	.B              ( b                ),
+	.HBlank         ( HBlank           ),
+	.VBlank         ( VBlank           ),
+	.HSync          ( hs               ),
+	.VSync          ( vs               ),
+	.VGA_R          ( VGA_R            ),
+	.VGA_G          ( VGA_G            ),
+	.VGA_B          ( VGA_B            ),
+	.VGA_VS         ( VGA_VS           ),
+	.VGA_HS         ( VGA_HS           ),
+`ifdef USE_HDMI
+	.HDMI_R         ( HDMI_R           ),
+	.HDMI_G         ( HDMI_G           ),
+	.HDMI_B         ( HDMI_B           ),
+	.HDMI_VS        ( HDMI_VS          ),
+	.HDMI_HS        ( HDMI_HS          ),
+	.HDMI_DE        ( HDMI_DE          ),
+`endif
 
-
-	mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS),.USE_BLANKS(1), .BIG_OSD(BIG_OSD)) mist_video (	
-	.clk_sys      (clk_sys     ),
-	.SPI_SCK      (SPI_SCK    ),
-	.SPI_SS3      (SPI_SS3    ),
-	.SPI_DI       (SPI_DI     ),
-	.R            (r          ),
-	.G            (g          ),
-	.B            (b          ),
-	.HSync        ( hs        ),
-	.VSync        ( vs        ),	
-	.HBlank       ( HBlank    ),
-	.VBlank       ( VBlank    ),	
-	.VGA_R        (VGA_R      ),
-	.VGA_G        (VGA_G      ),
-	.VGA_B        (VGA_B      ),
-	.VGA_VS       (VGA_VS     ),
-	.VGA_HS       (VGA_HS     ),
-	.ce_divider   (1'b0       ),
+	.ce_divider     ( 4'h3             ),
+	.rotate         ( 2'b00            ),
+	.rotate_screen  ( 1'b0             ),
+	.rotate_hfilter ( 1'b0             ),
+	.rotate_vfilter ( 1'b0             ),
+	.blend          (                  ),
 	.scandoubler_disable(scandoubler_disable),
-	.scanlines    (status[5:4]),
-	.ypbpr        (ypbpr      )
+	.scanlines      (status[5:4]),
+	.ypbpr          (ypbpr             ),
+	.no_csync       (no_csync          )
 	);
 
+	
 `ifdef USE_HDMI
-
-  i2c_master #(28_000_000) i2c_master (
+i2c_master #(28_000_000) i2c_master (
 	.CLK         (clk_hdmi),
 	.I2C_START   (i2c_start),
 	.I2C_READ    (i2c_read),
@@ -507,44 +562,88 @@ telestrat telestrat
 	//I2C bus
 	.I2C_SCL     (HDMI_SCL),
 	.I2C_SDA     (HDMI_SDA)
-);
-
-mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(8), .USE_BLANKS(1), .BIG_OSD(BIG_OSD), .VIDEO_CLEANER(1)) hdmi_video (
-	.clk_sys     ( clk_hdmi   ),
-
-	.SPI_SCK     ( SPI_SCK    ),
-	.SPI_SS3     ( SPI_SS3    ),
-	.SPI_DI      ( SPI_DI     ),
-
-	.scanlines   ( status[5:4]  ),
-
-	.ce_divider  ( 3'd1       ),
-
-	.scandoubler_disable ( scandoubler_disable ),
-	.no_csync    ( 1'b1       ),
-	.ypbpr       ( 1'b0       ),
-	.rotate      ( 2'b00      ),
-	.blend       ( 1'b0       ),
-
-	.R           ( r ),
-	.G           ( g ),
-	.B           ( b ),
-
-	.HBlank      ( HBlank      ),
-	.VBlank      ( VBlank      ),
-	.HSync       ( hs      ),
-	.VSync       ( vs      ),
-
-	.VGA_R       ( HDMI_R      ),
-	.VGA_G       ( HDMI_G      ),
-	.VGA_B       ( HDMI_B      ),
-	.VGA_VS      ( HDMI_VS     ),
-	.VGA_HS      ( HDMI_HS     ),
-	.VGA_DE      ( HDMI_DE     )
-);
+);	
 assign HDMI_PCLK = clk_hdmi;
 
 `endif
+
+//	mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS),.USE_BLANKS(1), .BIG_OSD(BIG_OSD)) mist_video (	
+//	.clk_sys      (clk_sys     ),
+//	.SPI_SCK      (SPI_SCK    ),
+//	.SPI_SS3      (SPI_SS3    ),
+//	.SPI_DI       (SPI_DI     ),
+//	.R            (r          ),
+//	.G            (g          ),
+//	.B            (b          ),
+//	.HSync        ( hs        ),
+//	.VSync        ( vs        ),	
+//	.HBlank       ( HBlank    ),
+//	.VBlank       ( VBlank    ),	
+//	.VGA_R        (VGA_R      ),
+//	.VGA_G        (VGA_G      ),
+//	.VGA_B        (VGA_B      ),
+//	.VGA_VS       (VGA_VS     ),
+//	.VGA_HS       (VGA_HS     ),
+//	.ce_divider   (1'b0       ),
+//	.scandoubler_disable(scandoubler_disable),
+//	.scanlines    (status[5:4]),
+//	.ypbpr        (ypbpr      )
+//	);
+//
+//`ifdef USE_HDMI
+//
+//  i2c_master #(28_000_000) i2c_master (
+//	.CLK         (clk_hdmi),
+//	.I2C_START   (i2c_start),
+//	.I2C_READ    (i2c_read),
+//	.I2C_ADDR    (i2c_addr),
+//	.I2C_SUBADDR (i2c_subaddr),
+//	.I2C_WDATA   (i2c_dout),
+//	.I2C_RDATA   (i2c_din),
+//	.I2C_END     (i2c_end),
+//	.I2C_ACK     (i2c_ack),
+//
+//	//I2C bus
+//	.I2C_SCL     (HDMI_SCL),
+//	.I2C_SDA     (HDMI_SDA)
+//);
+//
+//mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(8), .USE_BLANKS(1), .BIG_OSD(BIG_OSD), .VIDEO_CLEANER(1)) hdmi_video (
+//	.clk_sys     ( clk_hdmi   ),
+//
+//	.SPI_SCK     ( SPI_SCK    ),
+//	.SPI_SS3     ( SPI_SS3    ),
+//	.SPI_DI      ( SPI_DI     ),
+//
+//	.scanlines   ( status[5:4]  ),
+//
+//	.ce_divider  ( 3'd1       ),
+//
+//	.scandoubler_disable ( scandoubler_disable ),
+//	.no_csync    ( 1'b1       ),
+//	.ypbpr       ( 1'b0       ),
+//	.rotate      ( 2'b00      ),
+//	.blend       ( 1'b0       ),
+//
+//	.R           ( r ),
+//	.G           ( g ),
+//	.B           ( b ),
+//
+//	.HBlank      ( HBlank      ),
+//	.VBlank      ( VBlank      ),
+//	.HSync       ( hs      ),
+//	.VSync       ( vs      ),
+//
+//	.VGA_R       ( HDMI_R      ),
+//	.VGA_G       ( HDMI_G      ),
+//	.VGA_B       ( HDMI_B      ),
+//	.VGA_VS      ( HDMI_VS     ),
+//	.VGA_HS      ( HDMI_HS     ),
+//	.VGA_DE      ( HDMI_DE     )
+//);
+//assign HDMI_PCLK = clk_hdmi;
+//
+//`endif
 
 
 ////////////////////// AUDIO MIXING /////////////////////////////

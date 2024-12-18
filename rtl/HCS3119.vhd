@@ -111,20 +111,18 @@ begin
 
 			
 			--
-			CS300n     <= '0' when (ADR>=x"00") and (ADR<=x"0F") AND IO = '0' else '1';
-			CS320n     <= '0' when (ADR>=x"20") and (ADR<=x"2F") AND IO = '0' else '1';
+			CS300n     <= '0' when (A>=x"300") and (A<=x"30F")  else '1';
+			CS320n     <= '0' when (A>=x"320") and (A<=x"32F")  else '1';
 			
-			CS1793n_INT<= '0' WHEN (ADR>=x"10") and (ADR<=x"13") AND IO = '0' ELSE '1';
-			CS314n     <= '0' WHEN (ADR>=x"14") and (ADR<=x"17") AND IO = '0' ELSE '1';
-			CS318n     <= '0' WHEN (ADR>=x"18") and (ADR<=x"1B") AND IO = '0' ELSE '1';
-			CS31Cn     <= '0' WHEN (ADR>=x"1C") and (ADR<=x"1F") AND IO = '0' ELSE '1';
+			CS1793n_INT<= '0' WHEN (A>=x"310") and (A<=x"313") ELSE '1';
+			CS314n     <= '0' WHEN (A>=x"314") and (A<=x"317") ELSE '1';
+			CS318n     <= '0' WHEN (A>=x"318") and (A<=x"31B") ELSE '1';
+			CS31Cn     <= '0' WHEN (A>=x"31C") and (A<=x"31F") ELSE '1';
 			CS360n     <= '0' WHEN (ADR(7 downto 5)) = "011" AND IO = '0' ELSE '1'; 
 
 		
 			-- Twiligte Board
-			CS340n     <= '0' WHEN (ADR>=x"40") and (ADR<=x"41") AND IO = '0' ELSE '1'; 
---			CS342n     <= '0' WHEN (ADR=x"42") AND IO = '0' ELSE '1'; 
---			CS343n     <= '0' WHEN (ADR=x"43") AND IO = '0' ELSE '1'; 
+			CS340n     <= '0' WHEN (A>=x"340") and (A<=x"341") ELSE '1'; 
 			CS342n     <= '0' WHEN A=x"342" ELSE '1'; 
 			CS343n     <= '0' WHEN A=x"343" ELSE '1'; 
 			-- 
