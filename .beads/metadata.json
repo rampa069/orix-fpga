@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "orix_fpga",
+  "project_id": "259bbd06-a18b-4a27-ae6e-e7b0ff617ef7"
+}
