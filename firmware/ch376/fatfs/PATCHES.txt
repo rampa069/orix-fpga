@@ -1,0 +1,6 @@
+FatFs R0.16 (http://elm-chan.org/fsw/ff/), unmodified except:
+
+ffconf.h  options for the CH376 firmware, marked "ch376 firmware".
+ff.c      f_rename(): the array size "FF_FS_EXFAT ? SZDIRE * 2 : SZDIRE" is
+          written as an #if, since cc65 does not accept a conditional
+          expression as an array size.

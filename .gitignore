@@ -45,3 +45,9 @@ c5_pin_model_dump.txt
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# CH376 firmware build output
+firmware/ch376/build/
+
+# local release files (cores, ROM and SD image), not tracked
+release/
