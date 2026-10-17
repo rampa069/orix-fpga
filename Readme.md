@@ -1,8 +1,7 @@
 # Orix FPGA, an Oric Telestrat with the Twilighte board
 
 A re-implementation of the [Oric Telestrat](https://fr.wikipedia.org/wiki/Oric_Telestrat)
-with the Twilighte board, running [Orix](http://orix.oric.org)
-([sources](https://github.com/orix-software)), for the MiST family of FPGA boards.
+with the Twilighte board, running [Orix](http://orix.oric.org), for the MiST family of FPGA boards.
 
 The project started in 2020 from the Oric core by SEILEBOST and has gained components and
 testing since. The Oricutron emulator, with its Twilighte board and CH376 plugins, is used
@@ -97,15 +96,26 @@ The simulations use [nvc](https://www.nickg.me.uk/nvc/), Icarus Verilog and Veri
   changes and to check the ULA video reads.
 - `sim/video` checks the VGA and HDMI timing.
 
+## Orix and the Twilighte board
+
+- [Orix software](https://github.com/orix-software), the kernel, shell and commands
+  ([kernel](https://github.com/orix-software/kernel),
+  [shell](https://github.com/orix-software/shell)).
+- [Orix documentation](https://orix-software.github.io/), with the user and developer
+  manuals.
+- [Twilighte board manual](https://github.com/orix-software/user_manual).
+
 ## Thanks to
 
+- [jede](https://github.com/jedeoric), for Orix and the Twilighte board.
+- [assinie](https://github.com/assinie), for the Orix SDK and the work on Orix.
+- [Oricutron](https://github.com/pete-gordon/oricutron), the reference model of this
+  core. The emulated CH376 firmware ports the protocol of its CH376 plugin.
 - Ron Rodritty, [retrowiki.es](https://www.retrowiki.es)
 - Chema Enguita
 - SiliceBit
 - The RW FPGA DEV Team
-- The Orix and Twilighte board authors, and the
-  [Defence Force forum](https://forum.defence-force.org)
-- The Oricutron authors
+- The [Defence Force forum](https://forum.defence-force.org)
 
 ## Licence
 
