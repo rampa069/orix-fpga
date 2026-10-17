@@ -38,8 +38,10 @@ Ready to use cores, the Orix cartridge and an SD image are published on the
   SiDi128, HDMI in 16:9 or 4:3 without stretching.
 - **Tape** input through the audio input of the board, which can also be heard.
 - **Joysticks** on the two Telestrat ports, fire 2 and fire 3 included.
-
-The WD1793 floppy controller exists in the sources but is not connected yet.
+- **WD1793 floppy controller** (drive A), reading and writing the `MFM_DISK` images used
+  by Oricutron directly, with no conversion: every command, Read Track and Write Track
+  (formatting) included. Formatting only reaches the tracks the image file already
+  holds, as the SD file cannot grow.
 
 ## Installing
 
@@ -58,8 +60,10 @@ CH376 instead of the image.
 |---|---|---|
 | | Load Cartridge | `.ROM` or `.R64` image of the ROM banks |
 | | Mount CH376 SD | `.VHD` or `.IMG` FAT image |
+| | Mount floppy | `.DSK` Oricutron `MFM_DISK` image |
 | System | CPU | 6502, 65C02, 65C816 |
 | System | Joysticks | Normal, Swapped |
+| System | Floppy write | Enabled, Protected |
 | System | CH376 (NeptUNOplus, Poseidon) | Virtual, Real |
 | Video | Scanlines | Off, 25 %, 50 %, 75 % |
 | Video | HDMI aspect (SiDi128) | 16:9, 4:3 |
@@ -95,6 +99,11 @@ The simulations use [nvc](https://www.nickg.me.uk/nvc/), Icarus Verilog and Veri
 - `sim/system` simulates the whole machine and writes a CPU trace, used to compare
   changes and to check the ULA video reads.
 - `sim/video` checks the VGA and HDMI timing.
+- `sim/fdc` reads every sector of several tracks of `MFM_DISK` images through the WD1793
+  and compares them with the file, then on a copy writes a sector, writes a deleted one,
+  reads and formats a track and checks data, marks and CRCs (`sim/fdc/run.sh image.dsk
+  ...`, Verilator). `survey.py` reports what an image exercises and `edsk2mfm.py`
+  converts EDSK images to `MFM_DISK`.
 
 ## Orix and the Twilighte board
 

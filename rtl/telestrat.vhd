@@ -75,6 +75,7 @@ ENTITY telestrat IS
 		DS1 : OUT STD_LOGIC;
 		DS2 : OUT STD_LOGIC;
 		DS3 : OUT STD_LOGIC;
+		FDC_DRIVE : OUT STD_LOGIC_VECTOR(1 DOWNTO 0);
 		WD_RESET : OUT STD_LOGIC;
 		
 		CH_D  : INOUT STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -245,6 +246,10 @@ ARCHITECTURE RTL OF telestrat IS
 	SIGNAL ula_WE_SRAM : STD_LOGIC;
 	SIGNAL ula_LATCH_SRAM : STD_LOGIC;
 	SIGNAL ula_MAPn : STD_LOGIC;
+	-- port A bank bits as HCS3119 sees them: VIA2, or the bank forced by the
+	-- Twilighte firmware 2 mirror of 0x314 (000 overlay RAM, 110 ROM bank 6)
+	SIGNAL mirror_on, mirror_rom : STD_LOGIC;
+	SIGNAL hcs_pa : STD_LOGIC_VECTOR(2 DOWNTO 0);
 	SIGNAL ula_CLK_4 : STD_LOGIC;
 	SIGNAL ula_CLK_4_en : STD_LOGIC;
 	SIGNAL ENA_1MHZ : STD_LOGIC;
@@ -538,7 +543,7 @@ BEGIN
 		A => cpu_ad (15 DOWNTO 0), -- 6502 Address Bus
 		RnW => cpu_rw, -- 6502 Read-/Write
 		IO => ula_CSIOn,
-		PA => via2_pa_out (2 DOWNTO 0), -- VIA1 PA Lines
+		PA => hcs_pa, -- VIA2 PA lines, or the 0x314 mirror
 
 		CS300n => CS300n,
 		CS314n => CS314n,
@@ -589,6 +594,7 @@ BEGIN
 		DS1 => DS1,
 		DS2 => DS2,
 		DS3 => DS3,
+		DRIVE => FDC_DRIVE,
 		WD_IRQ => WD_IRQ,
 		WD_DRQ => WD_DRQ,
 		WD_HLD => WD_HLD,
@@ -660,7 +666,9 @@ BEGIN
 			DB_OUT => TWL_DO,
 
 			BANK => BANK,
-			ISRAM => ROM_CSn
+			ISRAM => ROM_CSn,
+			MIRROR_ON => mirror_on,
+			MIRROR_ROM => mirror_rom
 		);
 
 	DS1501 : ENTITY work.DS1501
@@ -774,6 +782,10 @@ BEGIN
 	-- Only CPU writes to the banked area may reach the board SDRAM. Without this
 	-- qualification any write (zero page, stack, screen) made while a board RAM
 	-- bank was selected was mirrored into that bank using A13:0.
+	hcs_pa <= via2_pa_out(2 DOWNTO 0) WHEN mirror_on = '0' ELSE
+	          "110" WHEN mirror_rom = '1' ELSE
+	          "000";
+
 	BANK_SEL <= '1' WHEN cpu_ad(15 DOWNTO 14) = "11" AND ula_MAPn = '1' ELSE '0';
 
 	-- Main RAM as decoded by the HCS10017 (CSRAMn) but without its PHI2
@@ -825,9 +837,9 @@ BEGIN
 ----	
 	cpu_di <= --CPU_DO WHEN cpu_rw = '0' ELSE
 		VIA1_DO WHEN cs300n = '0' ELSE
-		--CONT_D_OUT       when cs314n = '0' else
-		--CONT_D_OUT       when cs318n = '0' else			 
-		--FDC_DAL_OUT      when CS1793n ='0' else 
+		CONT_D_OUT  WHEN CS314n = '0' ELSE
+		CONT_D_OUT  WHEN CS318n = '0' ELSE
+		FDC_DAL_OUT WHEN CS1793n = '0' ELSE
 		ACIA_DO  WHEN CS31Cn = '0' ELSE
 		VIA2_DO  WHEN CS320n = '0' ELSE
 

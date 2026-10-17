@@ -46,6 +46,7 @@ ENTITY HCS3120 IS
 		DS1             : OUT std_logic;
 		DS2             : OUT std_logic;
 		DS3             : OUT std_logic;
+		DRIVE           : OUT std_logic_vector(1 DOWNTO 0); -- selected drive
 
 		
 		WD_REn          : IN STD_LOGIC;
@@ -63,21 +64,22 @@ ARCHITECTURE Behavioral OF HCS3120 IS
 BEGIN 
 			-- ORIC Expansion Port Signals
 			nIRQ <= '0' WHEN WD_IRQ = '1' AND IRQEN = '1' ELSE '1'; 
+			DRIVE <= DSEL;
           
          DS0 <= '1' when DSEL = "00" and WD_HLD ='1' else '0';
 			DS1 <= '1' when DSEL = "01" and WD_HLD ='1' else '0';
 			DS2 <= '1' when DSEL = "10" and WD_HLD ='1' else '0';
 			DS3 <= '1' when DSEL = "11" and WD_HLD ='1' else '0';
 			
-			-- Data Bus Control.
+			-- Data Bus Control. Bits 6 to 0 read as 1, as in Oricutron
 			PROCESS (RnW, WD_DRQ, WD_IRQ, CS318n,CS314n)
 			BEGIN
 					IF Cs318n = '0' THEN
-					   DO <= (not WD_DRQ) & "-------"; 
+					   DO <= (not WD_DRQ) & "1111111"; 
 					ELSIF CS314n = '0' THEN
-						DO <= (NOT WD_IRQ) & "-------";
+						DO <= (NOT WD_IRQ) & "1111111";
 					ELSE
-					   DO <= "--------"; 
+					   DO <= "11111111"; 
 					END IF;
 			END PROCESS; 
 			

@@ -76,7 +76,7 @@ BEGIN
 			mode => cpu_mode, debug => OPEN,
 			cpu_ad => cpu_ad, cpu_do => cpu_do,
 			WD_REn => OPEN, WD_WEn => OPEN, WD_DRQ => '0', WD_IRQ => '0', WD_HLD => '0', WD_CLK => OPEN,
-			FDC_DAL_OUT => x"00", CS1793n => OPEN, SSEL => OPEN, DS0 => OPEN, DS1 => OPEN, DS2 => OPEN, DS3 => OPEN,
+			FDC_DAL_OUT => x"00", CS1793n => OPEN, SSEL => OPEN, DS0 => OPEN, DS1 => OPEN, DS2 => OPEN, DS3 => OPEN, FDC_DRIVE => OPEN,
 			WD_RESET => OPEN,
 			CH_D => ch_d, CH_A0 => OPEN, CH_RD => OPEN, CH_WR => OPEN, CH_CS => OPEN,
 			SD_LBA => OPEN, SD_RD => OPEN, SD_WR => OPEN, SD_ACK => '0',

@@ -8,7 +8,7 @@
 module guest_top
   #
   (
-   parameter  TOT_DISKS = 1
+   parameter  TOT_DISKS = 2
    )
 (
 	input         CLOCK_27,
@@ -162,12 +162,14 @@ localparam CONF_STR = {
 	"ORIX;;",
 	"F0,ROMR64,Load Cartridge;",
 	"S0U,IMGVHD,Mount CH376 SD;",
+	"S1U,DSK,Mount floppy;",
 	"-;",
 	// the pages only group the options, the status bits keep their meaning
 	// (saved configurations stay valid)
 	"P1,System;",
 	"P1O23,CPU,6502,65C02,65C816;",
 	"P1OD,Joysticks,Normal,Swapped;",
+	"P1OE,Floppy write,Enabled,Protected;",
 `ifdef USE_EXTBUS
 	"P1O7,CH376,Virtual,Real;",
 `endif
@@ -251,7 +253,8 @@ wire [127:0] status;
 wire [31:0] sd_lba[TOT_DISKS];
 wire  [TOT_DISKS-1:0] sd_rd;
 wire  [TOT_DISKS-1:0] sd_wr;
-wire  [TOT_DISKS-1:0] sd_ack;
+wire        sd_ack;                  // any transfer
+wire  [TOT_DISKS-1:0] sd_ack_x;      // transfer of image slot n
 wire  [8:0] sd_buff_addr;
 wire  [7:0] sd_buff_dout;
 wire  [7:0] sd_buff_din[TOT_DISKS];
@@ -335,16 +338,17 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(TOT_DISKS), .FEATURES(32'h0 | 
 	.rtc              (rtc),
 	.no_csync         (no_csync         ),
 	// SD CARD
-   .sd_lba                      (sd_lba[0]     ),
+   .sd_lba                      (sd_lba_mux    ),
 	.sd_rd                       (sd_rd         ),
 	.sd_wr                       (sd_wr         ),
 	.sd_ack                      (sd_ack        ),
+	.sd_ack_x                    (sd_ack_x      ),
 	.sd_ack_conf                 (sd_ack_conf   ),
 	.sd_conf                     (sd_conf       ),
 	.sd_sdhc                     (sd_sdhc       ),
 	.sd_dout                     (sd_buff_dout  ),
 	.sd_dout_strobe              (sd_buff_wr    ),
-	.sd_din                      (sd_buff_din[0]),
+	.sd_din                      (sd_din_mux    ),
 //	.sd_din_strobe               (sd_din_strobe ),
 	.sd_buff_addr                (sd_buff_addr  ),
 	.img_mounted                 (img_mounted   ),
@@ -528,6 +532,72 @@ wire       ch376_virtual = 1'b1;
 
 assign sd_conf = 1'b0;
 
+/////////////////// FLOPPY DISK CONTROLLER ////////////////////////////
+
+// WD1793 of the Telestrat (0x310-0x313), reading Oricutron MFM_DISK images
+// from user_io image slot 1. HCS3119 decodes the chip select and the read and
+// write strobes, HCS3120 holds the 0x314 control register (drive, side, IRQ
+// enable) and answers the INTRQ and DRQ reads at 0x314 and 0x318. Only drive
+// A is fitted.
+
+wire        fdc_ren, fdc_wen, fdc_csn;
+wire        fdc_drq, fdc_irq, fdc_hld;
+wire        fdc_reset, fdc_side;
+wire  [1:0] fdc_drive;
+wire  [7:0] fdc_dout;
+
+// FDC clock enable, 24 MHz / 6 = 4 MHz
+reg   [2:0] fdc_ce_cnt = 0;
+wire        fdc_ce = (fdc_ce_cnt == 0);
+always @(posedge clk_sys) fdc_ce_cnt <= (fdc_ce_cnt == 5) ? 3'd0 : fdc_ce_cnt + 1'd1;
+
+// an image is in the drive from its first mount; img_size is sampled when
+// the mount pulse ends, as the FDC does
+reg         fdd_loaded = 0;
+reg         fdd_mounted_d = 0;
+always @(posedge clk_sys) begin
+	fdd_mounted_d <= img_mounted[1];
+	if (fdd_mounted_d & ~img_mounted[1]) fdd_loaded <= |img_size[31:0];
+end
+
+wd1793 fdc
+(
+	.clk_sys       (clk_sys),
+	.ce            (fdc_ce),
+	.reset         (fdc_reset | reset),
+	.io_en         (~fdc_csn),
+	.rd            (~fdc_ren),
+	.wr            (~fdc_wen),
+	.addr          (cpu_ad[1:0]),
+	.din           (cpu_do),
+	.dout          (fdc_dout),
+	.drq           (fdc_drq),
+	.intrq         (fdc_irq),
+	.busy          (),
+	.headloaded    (fdc_hld),
+
+	.wp            (status[14]),
+	.side          (fdc_side),
+	.ready         (fdd_loaded && (fdc_drive == 2'd0)),
+	.check_crc     (1'b0),   // old images store F7 F7 instead of CRCs
+
+	.img_mounted   (img_mounted[1]),
+	.img_size      (img_size[31:0]),
+	.sd_lba        (sd_lba[1]),
+	.sd_rd         (sd_rd[1]),
+	.sd_wr         (sd_wr[1]),
+	.sd_ack        (sd_ack_x[1]),
+	.sd_buff_addr  (sd_buff_addr),
+	.sd_buff_dout  (sd_buff_dout),
+	.sd_buff_din   (sd_buff_din[1]),
+	.sd_buff_wr    (sd_buff_wr)
+);
+
+// user_io serves one request at a time and latches the LBA when the
+// transfer starts; it picks the highest slot asking, so the LBA follows it
+wire [31:0] sd_lba_mux = (sd_rd[1] | sd_wr[1]) ? sd_lba[1] : sd_lba[0];
+wire  [7:0] sd_din_mux = sd_ack_x[1] ? sd_buff_din[1] : sd_buff_din[0];
+
 telestrat #(.CH376_BACKEND(CH376_BACKEND)) telestrat
 (
 	.clk_in           (clk_sys),
@@ -588,10 +658,10 @@ telestrat #(.CH376_BACKEND(CH376_BACKEND)) telestrat
 	.sd_lba           (sd_lba[0]),
 	.sd_rd            (sd_rd[0]),
 	.sd_wr            (sd_wr[0]),
-	.sd_ack           (sd_ack),
+	.sd_ack           (sd_ack_x[0]),
 	.sd_buff_addr     (sd_buff_addr),
 	.sd_buff_dout     (sd_buff_dout),
-	.sd_buff_wr       (sd_buff_wr),
+	.sd_buff_wr       (sd_buff_wr & sd_ack_x[0]),
 	.sd_buff_din      (sd_buff_din[0]),
 	.img_mounted      (img_mounted[0]),
 	.img_size         (img_size),
@@ -604,20 +674,21 @@ telestrat #(.CH376_BACKEND(CH376_BACKEND)) telestrat
 	.cpu_ad           (cpu_ad),
 	.cpu_do           (cpu_do),
 	
-//  .WD_REn           (WD_REn),
-//	.WD_WEn           (WD_WEn), 
-//   .WD_DRQ           (fdd_drq),
-//	.WD_IRQ           (fdd_irq),
-//	.WD_HLD           (fdd_hld),
-//	.WD_CLK           (WD_CLK),
-//	.WD_RESET         (WD_RESET),
-//	.FDC_DAL_OUT      (fdc_dal_out),
-//	.CS1793n          (CS1793n),
-//	.SSEL             (SSEL),
-//	.DS0              (DS0),
-//	.DS1              (DS1),
-//	.DS2              (DS2),
-//	.DS3              (DS3),
+	.WD_REn           (fdc_ren),
+	.WD_WEn           (fdc_wen),
+	.WD_DRQ           (fdc_drq),
+	.WD_IRQ           (fdc_irq),
+	.WD_HLD           (fdc_hld),
+	.WD_CLK           (),
+	.WD_RESET         (fdc_reset),
+	.FDC_DAL_OUT      (fdc_dout),
+	.CS1793n          (fdc_csn),
+	.SSEL             (fdc_side),
+	.DS0              (),
+	.DS1              (),
+	.DS2              (),
+	.DS3              (),
+	.FDC_DRIVE        (fdc_drive),
 	
 	.pll_locked       (locked),
 	.UART_TXD         (UART_TX),
