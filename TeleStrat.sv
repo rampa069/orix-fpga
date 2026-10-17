@@ -161,13 +161,27 @@ wire TAPE_SOUND=UART_RX;
 localparam CONF_STR = {
 	"ORIX;;",
 	"F0,ROMR64,Load Cartridge;",
-	"O23,Mode,6502,65c02,65C816;",
-//	"O1,RAM,bram,sdram;",
+	"S0U,IMGVHD,Mount CH376 SD;",
 	"-;",
-	"O45,Scandoubler Fx,None,CRT 25%,CRT 50%,CRT 75%;",
-	"O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
+	// the pages only group the options, the status bits keep their meaning
+	// (saved configurations stay valid)
+	"P1,System;",
+	"P1O23,CPU,6502,65C02,65C816;",
+`ifdef USE_EXTBUS
+	"P1O7,CH376,Virtual,Real;",
+`endif
+	"P2,Video;",
+	"P2O45,Scanlines,Off,25%,50%,75%;",
+`ifdef USE_HDMI
+	"P2O6,HDMI aspect,16:9,4:3;",
+`endif
+	"P3,Audio;",
+	"P3OA,PSG,AY-3-8912,YM2149;",
+	"P3O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
+	"P3OC,Tape sound,Off,On;",
 	"-;",
-	"T0,Reset & Apply;",
+	"T0,Reset;",
+	"TB,Cold reset (clear board RAM);",
 	"V,v",`BUILD_DATE
 };
 
@@ -176,14 +190,18 @@ localparam CONF_STR = {
 
 wire        clk_sys;   // 24 Mhz
 wire        clk_acia;  // 1 Mhz
-wire        clk_hdmi;  // 28Mhz
+wire        clk_hdmi;  // 48 MHz, exactly 2 x clk_sys so the ULA video is sampled synchronously
 wire        clk_ram;   // 96 Mhz
 wire        locked;
 
 
 pll pll
 (
+`ifdef USE_CLOCK_50
 	.inclk0(CLOCK_50),
+`else
+	.inclk0(CLOCK_27),        // SiDi: 27 MHz, its pll.v gives the same outputs
+`endif
 	.c0(clk_sys),
 	.c1(clk_acia),
 	.c2(clk_hdmi),
@@ -192,9 +210,24 @@ pll pll
 );
 
 
-reg        reset = 0;
+// Both CPUs run from reset, but only the selected one drives the bus: the
+// other executes on data meant for the first and its state is meaningless.
+// Changing the CPU type therefore resets the machine. The pulse is stretched
+// (1024 clocks, about 43 us) since HCS3119 samples its reset input on PH2.
+// Changing the CH376 backend resets it too, since Orix only probes the CH376
+// at boot.
+reg  [2:0] cpu_mode_d;
+reg [10:0] cpu_reset_cnt = 0;
+always @(posedge clk_sys) begin
+	cpu_mode_d <= {status[7], status[3:2]};
+	if (cpu_mode_d != {status[7], status[3:2]})
+		cpu_reset_cnt <= 11'd1024;
+	else if (cpu_reset_cnt != 0)
+		cpu_reset_cnt <= cpu_reset_cnt - 1'd1;
+end
 
-assign reset= status[0] || buttons[1]|| ~locked || ioctl_download ;
+wire       ram_clear_busy;     // board RAM clear after power up, see below
+wire       reset = status[0] || buttons[1] || ~locked || ioctl_download || (cpu_reset_cnt != 0) || ram_clear_busy;
 //assign LED=~rom_address[19];
 
 //////////////////// HPS ///////////////////////////////
@@ -334,6 +367,9 @@ wire[7:0]  rom_q;
 reg        rom_rd;
 reg        rom_wr;
 wire       isRAM = rom_address[19];
+wire       ram_sel;          // CPU access to main RAM, served by the SDRAM
+wire[23:0] cpu_ad;
+wire [7:0] cpu_do;
 
 
 altddio_out
@@ -364,6 +400,52 @@ sdramclk_ddr
 );
 
 
+// SDRAM map (byte addresses): 0x000000 cartridge ROM banks, 0x080000 board
+// RAM banks (rom_address[19] = 1), 0x100000 the 64 KB main RAM.
+//
+// The Twilighte board RAM (the high 512 KB of the cartridge area in SDRAM,
+// rom_address[19] = 1) has no battery: it starts empty on the real board.
+// The SDRAM keeps whatever it held (for instance from the previous core), and
+// the Orix bank listing shows a RAM bank as used whenever its byte at 0xFFF0
+// is not 0. Clear it once after power up, holding the machine in reset. It is
+// not cleared on a reset (F11), as the real board RAM survives one, only on
+// the OSD cold reset. The main RAM that follows it is cleared too, so that it
+// starts at zero like the video shadow in block RAM.
+// One byte every 8 clk_sys keeps the address stable for 32 clk_ram after the
+// write strobe, enough for the controller to take it even behind a refresh;
+// 576 KB take about 200 ms. A cartridge download meanwhile takes priority.
+reg [20:0] ram_clear_addr;
+reg [14:0] ram_clear_delay;
+reg  [2:0] ram_clear_phase;
+reg        ram_clear_we;
+reg        ram_clear_run = 1'b1;
+always @(posedge clk_sys) begin
+	if (~locked || status[11]) begin   // power up or OSD cold reset
+		ram_clear_run   <= 1'b1;
+		ram_clear_delay <= 0;
+		ram_clear_addr  <= 21'h080000;
+		ram_clear_phase <= 0;
+		ram_clear_we    <= 1'b0;
+	end else if (ram_clear_run) begin
+		if (~&ram_clear_delay) begin
+			// let the SDRAM controller finish its initialisation first (about 680 us)
+			ram_clear_delay <= ram_clear_delay + 1'd1;
+		end else if (ioctl_download) begin
+			ram_clear_we <= 1'b0;
+		end else begin
+			ram_clear_phase <= ram_clear_phase + 1'd1;
+			ram_clear_we    <= (ram_clear_phase == 3'd1);
+			if (ram_clear_phase == 3'd7) begin
+				if (ram_clear_addr == 21'h10FFFF)
+					ram_clear_run <= 1'b0;
+				else
+					ram_clear_addr <= ram_clear_addr + 1'd1;
+			end
+		end
+	end
+end
+assign ram_clear_busy = ram_clear_run;
+
 sdram sdram
 (
    .*,
@@ -371,11 +453,12 @@ sdram sdram
    .clk(clk_ram),
 
    .wtbt(0),
-   .addr(ioctl_download ? ioctl_addr : rom_address),
-   .rd(rom_rd),
+   .addr(ioctl_download ? ioctl_addr : ram_clear_run ? {4'd0, ram_clear_addr} :
+         ram_sel ? {9'h010, cpu_ad[15:0]} : {5'd0, rom_address}),
+   .rd(ram_clear_run ? 1'b0 : rom_rd),
    .dout(rom_data),
-   .din (ioctl_download? ioctl_dout:rom_q),
-   .we  (ioctl_download? ioctl_wr : isRAM?rom_wr:0),
+   .din (ioctl_download ? ioctl_dout : ram_clear_run ? 8'h00 : rom_q),
+   .we  (ioctl_download ? ioctl_wr : ram_clear_run ? ram_clear_we : (ram_sel | isRAM) ? rom_wr : 1'b0),
    .ready()
 );
 
@@ -383,6 +466,10 @@ sdram sdram
 ///////////////////////////////////////////////////
 
 
+
+wire tape_in;
+wire tape_out;
+wire cas_relay;
 
 wire  [11:0] psg_a;
 wire  [11:0] psg_b;
@@ -400,20 +487,42 @@ wire [15:0] ram_ad;
 wire  [7:0] ram_d;
 wire        ram_we,ram_cs;
 
-reg   [7:0] ram[65536];
+// Video shadow: the ULA reads the video memory on the ram_* port with only
+// 2 to 3 clk_sys between address and data, too little for the SDRAM, so its
+// reads come from a block RAM copy of 0x9800-0xC3FF, written together with
+// the main RAM in SDRAM. That range holds every address the HCS10017 can
+// generate: the character sets (0x9800-0x9FFF, 0xB400-0xBBFF), the hires
+// screen (0xA000-0xBF57, lines 0 to 199 only, text is forced from line 200)
+// and the text screen counter, which reaches 0xC1D7 in the last blanking line.
+localparam [15:0] SHADOW_BASE = 16'h9800;
+localparam        SHADOW_SIZE = 11264;            // 11 KB, up to 0xC3FF
+wire [15:0] shadow_off = ram_ad - SHADOW_BASE;
+wire        shadow_hit = (ram_ad >= SHADOW_BASE) && (shadow_off < SHADOW_SIZE);
+reg   [7:0] ram[SHADOW_SIZE];
 always @(posedge clk_sys) begin
-	if(ram_we & ram_cs) ram[ram_ad] <= ram_d;
+	if(ram_we & ram_cs & shadow_hit) ram[shadow_off[13:0]] <= ram_d;
 end
 
 wire  [7:0] ram_q;
-always @(posedge clk_sys) ram_q <= ram[ram_ad];
+always @(posedge clk_sys) ram_q <= ram[shadow_off[13:0]];
 
-wire [23:0]  cpu_ad;
-wire [7:0]   cpu_do;
 
 //assign CH_CS=0;
 
-telestrat telestrat
+// CH376: every board gets the emulated one on user_io image slot 0. Boards
+// with the external bus also have the bridge to a physical CH376 on the CH_*
+// pins, and the OSD chooses between both.
+`ifdef USE_EXTBUS
+localparam CH376_BACKEND = 2;
+wire       ch376_virtual = ~status[7];
+`else
+localparam CH376_BACKEND = 1;
+wire       ch376_virtual = 1'b1;
+`endif
+
+assign sd_conf = 1'b0;
+
+telestrat #(.CH376_BACKEND(CH376_BACKEND)) telestrat
 (
 	.clk_in           (clk_sys),
 	.RESET            (reset),
@@ -454,6 +563,7 @@ telestrat telestrat
 	.rom_d            (rom_data),
 	.rom_rd           (rom_rd),
 	.rom_wr           (rom_wr),
+	.ram_sel          (ram_sel),
 	
 	.mode             (status[3:2]),
 	.debug            (LED),
@@ -465,6 +575,20 @@ telestrat telestrat
    .ch_rd            (CH_RD),	
    .ch_wr            (CH_WR),	
 `endif
+
+	.ch376_virtual    (ch376_virtual),
+	.psg_ym           (status[10]),
+
+	.sd_lba           (sd_lba[0]),
+	.sd_rd            (sd_rd[0]),
+	.sd_wr            (sd_wr[0]),
+	.sd_ack           (sd_ack),
+	.sd_buff_addr     (sd_buff_addr),
+	.sd_buff_dout     (sd_buff_dout),
+	.sd_buff_wr       (sd_buff_wr),
+	.sd_buff_din      (sd_buff_din[0]),
+	.img_mounted      (img_mounted[0]),
+	.img_size         (img_size),
 	
 	.joystick_0       (joy_t0),
 	.joystick_1       (joy_t1),
@@ -500,55 +624,123 @@ telestrat telestrat
 
 /////////////////// VIDEO PROCESSING ////////////////////////////////
 
-mist_dual_video 
-   #(.COLOR_DEPTH(1),
+// The ULA only marks the paper as active and times its syncs for a PAL
+// television. video_window derives the scandoubled VGA and HDMI timing (see
+// rtl/video_window.sv), so VGA and HDMI each get their own mist_video. The
+// 15 kHz RGB output keeps the ULA signals unchanged.
+
+wire       vw_r, vw_g, vw_b;
+wire       vw_vga_hs, vw_vga_vs, vw_vga_hb, vw_vga_vb;
+wire       vw_hdmi_hs, vw_hdmi_vs, vw_hdmi_hb, vw_hdmi_vb;
+
+video_window video_window
+(
+	.clk       ( clk_sys      ),
+	.ce        ( clk_pix      ),
+	.hblank    ( HBlank       ),
+	.vblank    ( VBlank       ),
+	.r_in      ( r            ),
+	.g_in      ( g            ),
+	.b_in      ( b            ),
+	.hdmi_wide ( ~status[6]   ),
+	.r         ( vw_r         ),
+	.g         ( vw_g         ),
+	.b         ( vw_b         ),
+	.vga_hs_n  ( vw_vga_hs    ),
+	.vga_vs_n  ( vw_vga_vs    ),
+	.vga_hb    ( vw_vga_hb    ),
+	.vga_vb    ( vw_vga_vb    ),
+	.hdmi_hs_n ( vw_hdmi_hs   ),
+	.hdmi_vs_n ( vw_hdmi_vs   ),
+	.hdmi_hb   ( vw_hdmi_hb   ),
+	.hdmi_vb   ( vw_hdmi_vb   )
+);
+
+// VGA: clk_sys / (3 + 1) = 6 MHz, one sample per ULA pixel, with the
+// video_window VGA timing; 15 kHz RGB gets the ULA signals unchanged.
+wire vga_native = scandoubler_disable;
+wire [VGA_BITS-1:0] vga_r_o, vga_g_o, vga_b_o;
+wire                vga_hs_o, vga_vs_o;
+
+mist_video #(
+	.COLOR_DEPTH(1),
 	.SD_HCNT_WIDTH(11),
 	.OUT_COLOR_DEPTH(VGA_BITS),
-	.USE_BLANKS(1'b1),
+	.USE_BLANKS(1'b0),          // as the VGA chains of the Atmos and ZEMMIX cores; HDMI keeps them
 	.BIG_OSD(BIG_OSD)
-	)
-mist_video
-(
+) vga_video (
+	.clk_sys        ( clk_sys          ),
+	.SPI_SCK        ( SPI_SCK          ),
+	.SPI_SS3        ( SPI_SS3          ),
+	.SPI_DI         ( SPI_DI           ),
+	.R              ( vga_native ? r      : vw_r      ),
+	.G              ( vga_native ? g      : vw_g      ),
+	.B              ( vga_native ? b      : vw_b      ),
+	.HBlank         ( vga_native ? HBlank : vw_vga_hb ),
+	.VBlank         ( vga_native ? VBlank : vw_vga_vb ),
+	.HSync          ( vga_native ? hs     : vw_vga_hs ),
+	.VSync          ( vga_native ? vs     : vw_vga_vs ),
+	.VGA_R          ( vga_r_o          ),
+	.VGA_G          ( vga_g_o          ),
+	.VGA_B          ( vga_b_o          ),
+	.VGA_VS         ( vga_vs_o         ),
+	.VGA_HS         ( vga_hs_o         ),
+	.ce_divider     ( 3'd3             ),
+	.rotate         ( 2'b00            ),
+	.blend          ( 1'b0             ),
+	.scandoubler_disable(scandoubler_disable),
+	.scanlines      ( status[5:4]      ),
+	.ypbpr          ( ypbpr            ),
+	.no_csync       ( no_csync         )
+);
+
+`ifdef USE_HDMI
+// HDMI: always scandoubled. clk_hdmi is 48 MHz, exactly 2 x clk_sys from the
+// same PLL, so clk_hdmi / (7 + 1) = 6 MHz samples each ULA pixel once and
+// HDMI_PCLK stays above the 25 MHz TMDS minimum.
+mist_video #(
+	.COLOR_DEPTH(1),
+	.SD_HCNT_WIDTH(11),
+	.OUT_COLOR_DEPTH(8),
+	.USE_BLANKS(1'b1),
+	.BIG_OSD(BIG_OSD),
+	.VIDEO_CLEANER(1'b1)
+) hdmi_video (
 	.clk_sys        ( clk_hdmi         ),
 	.SPI_SCK        ( SPI_SCK          ),
 	.SPI_SS3        ( SPI_SS3          ),
 	.SPI_DI         ( SPI_DI           ),
-	.R              ( r                ),
-	.G              ( g                ),
-	.B              ( b                ),
-	.HBlank         ( HBlank           ),
-	.VBlank         ( VBlank           ),
-	.HSync          ( hs               ),
-	.VSync          ( vs               ),
-	.VGA_R          ( VGA_R            ),
-	.VGA_G          ( VGA_G            ),
-	.VGA_B          ( VGA_B            ),
-	.VGA_VS         ( VGA_VS           ),
-	.VGA_HS         ( VGA_HS           ),
-`ifdef USE_HDMI
-	.HDMI_R         ( HDMI_R           ),
-	.HDMI_G         ( HDMI_G           ),
-	.HDMI_B         ( HDMI_B           ),
-	.HDMI_VS        ( HDMI_VS          ),
-	.HDMI_HS        ( HDMI_HS          ),
-	.HDMI_DE        ( HDMI_DE          ),
+	.R              ( vw_r             ),
+	.G              ( vw_g             ),
+	.B              ( vw_b             ),
+	.HBlank         ( vw_hdmi_hb       ),
+	.VBlank         ( vw_hdmi_vb       ),
+	.HSync          ( vw_hdmi_hs       ),
+	.VSync          ( vw_hdmi_vs       ),
+	.VGA_R          ( HDMI_R           ),
+	.VGA_G          ( HDMI_G           ),
+	.VGA_B          ( HDMI_B           ),
+	.VGA_VS         ( HDMI_VS          ),
+	.VGA_HS         ( HDMI_HS          ),
+	.VGA_DE         ( HDMI_DE          ),
+	.ce_divider     ( 3'd7             ),
+	.rotate         ( 2'b00            ),
+	.blend          ( 1'b0             ),
+	.scandoubler_disable( 1'b0         ),
+	.scanlines      ( status[5:4]      ),
+	.ypbpr          ( 1'b0             ),
+	.no_csync       ( 1'b1             )
+);
 `endif
 
-	.ce_divider     ( 4'h3             ),
-	.rotate         ( 2'b00            ),
-	.rotate_screen  ( 1'b0             ),
-	.rotate_hfilter ( 1'b0             ),
-	.rotate_vfilter ( 1'b0             ),
-	.blend          (                  ),
-	.scandoubler_disable(scandoubler_disable),
-	.scanlines      (status[5:4]),
-	.ypbpr          (ypbpr             ),
-	.no_csync       (no_csync          )
-	);
+assign VGA_R  = vga_r_o;
+assign VGA_G  = vga_g_o;
+assign VGA_B  = vga_b_o;
+assign VGA_HS = vga_hs_o;
+assign VGA_VS = vga_vs_o;
 
-	
 `ifdef USE_HDMI
-i2c_master #(28_000_000) i2c_master (
+i2c_master #(48_000_000) i2c_master (
 	.CLK         (clk_hdmi),
 	.I2C_START   (i2c_start),
 	.I2C_READ    (i2c_read),
@@ -665,8 +857,12 @@ assign psg_r = (stereo == 2'b00) ? {psg_out,2'b0} : (stereo == 2'b01) ? {psg_bc,
 
 wire [15:0] dac_in_l,dac_in_r;
 
-assign dac_in_l = psg_l;
-assign dac_in_r = psg_r;
+// OSD tape sound: the cassette input added to both channels, saturated
+wire [15:0] tape_snd = (status[12] & tape_in) ? 16'h0800 : 16'h0000;
+wire [16:0] mix_l = psg_l + tape_snd;
+wire [16:0] mix_r = psg_r + tape_snd;
+assign dac_in_l = mix_l[16] ? 16'hFFFF : mix_l[15:0];
+assign dac_in_r = mix_r[16] ? 16'hFFFF : mix_r[15:0];
 
 
 dac #(
@@ -723,9 +919,6 @@ spdif spdif (
 `endif
 
 
-wire tape_in;
-wire tape_out;
-wire cas_relay;
 
 assign tape_in = TAPE_SOUND;
 

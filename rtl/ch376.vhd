@@ -7,6 +7,7 @@ entity ch376_interface is
         clk         : in  std_logic;
 		  PH2         : in std_logic;                      -- 6502 PH2 
         reset_n     : in  std_logic;
+        ena         : in  std_logic := '1';             -- '0' keeps the CH376 bus idle (backend not selected)
         addr        : in  std_logic_vector(15 downto 0); -- Processor address
         data_in     : in  std_logic_vector(7 downto 0);  -- Data from the processor to the CH376
         data_out    : out std_logic_vector(7 downto 0);  -- Data from the CH376 to the processor
@@ -33,9 +34,9 @@ architecture Behavioral of ch376_interface is
 
 begin
 
-    process(addr)
+    process(addr, ena)
     begin
-        if addr = x"0340" or addr = x"0341" then
+        if (addr = x"0340" or addr = x"0341") and ena = '1' then
             cs340n_int <= '0'; -- Chip select active
         else
             cs340n_int <= '1'; -- Chip select inactive

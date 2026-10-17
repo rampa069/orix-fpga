@@ -9,6 +9,12 @@ USE ieee.std_logic_1164.ALL;
 USE ieee.std_logic_arith.ALL;
 USE ieee.std_logic_unsigned.ALL;
 ENTITY telestrat IS
+	GENERIC (
+		-- 0: bridge to a physical CH376 on the CH_* pins only,
+		-- 1: emulated CH376 (rtl/ch376_core.vhd) on the user_io SD image only,
+		-- 2: both, chosen at run time with CH376_VIRTUAL
+		CH376_BACKEND : INTEGER := 1
+	);
 	PORT (
 		CLK_IN : IN STD_LOGIC;
 		CLK_ACIA : IN STD_LOGIC;
@@ -45,6 +51,10 @@ ENTITY telestrat IS
 		rom_q : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 		rom_rd : OUT STD_LOGIC;
 		rom_wr : OUT STD_LOGIC;
+		-- '1' while the CPU address selects main RAM: the rom_* port then
+		-- serves the 64 KB main RAM (SDRAM) instead of the banked area. The
+		-- ram_* port only feeds the ULA video reads (shadow in block RAM).
+		ram_sel : OUT STD_LOGIC;
 
 		mode : IN STD_LOGIC_VECTOR(1 DOWNTO 0);
 		debug : OUT STD_LOGIC;
@@ -72,6 +82,22 @@ ENTITY telestrat IS
 		CH_RD : OUT STD_LOGIC;
 		CH_WR : OUT STD_LOGIC;
 		CH_CS : OUT STD_LOGIC;
+		-- with CH376_BACKEND = 2: '1' selects the emulated CH376, '0' the physical one
+		CH376_VIRTUAL : IN STD_LOGIC := '1';
+		-- PSG personality: '0' GI AY-3-8912 (as fitted), '1' Yamaha YM2149
+		PSG_YM : IN STD_LOGIC := '0';
+
+		-- user_io SD image slot for the emulated CH376
+		SD_LBA       : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+		SD_RD        : OUT STD_LOGIC;
+		SD_WR        : OUT STD_LOGIC;
+		SD_ACK       : IN  STD_LOGIC;
+		SD_BUFF_ADDR : IN  STD_LOGIC_VECTOR(8 DOWNTO 0);
+		SD_BUFF_DOUT : IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
+		SD_BUFF_WR   : IN  STD_LOGIC;
+		SD_BUFF_DIN  : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+		IMG_MOUNTED  : IN  STD_LOGIC;
+		IMG_SIZE     : IN  STD_LOGIC_VECTOR(31 DOWNTO 0);
 
 		phi2 : OUT STD_LOGIC;
 		fdd_ready : IN STD_LOGIC;
@@ -160,6 +186,8 @@ ARCHITECTURE RTL OF telestrat IS
 	SIGNAL CS5n : STD_LOGIC;
 	SIGNAL CS6n : STD_LOGIC;
 	SIGNAL ROM_CSn : STD_LOGIC;
+	SIGNAL MAIN_RAM_SEL : STD_LOGIC;
+	SIGNAL BANK_SEL : STD_LOGIC; -- CPU access to the banked area (C000-FFFF, not mapped to overlay RAM)
 	-- ACIA
 	SIGNAL ACIA_DO : STD_LOGIC_VECTOR(7 DOWNTO 0);
 	SIGNAL acia_irq : STD_LOGIC;
@@ -183,6 +211,7 @@ ARCHITECTURE RTL OF telestrat IS
 	-- PSG
 	SIGNAL ym_ioa_out : STD_LOGIC_VECTOR (7 DOWNTO 0);
 	SIGNAL psg_do : STD_LOGIC_VECTOR (7 DOWNTO 0);
+	SIGNAL psg_mix : UNSIGNED (14 DOWNTO 0);
 	SIGNAL psg_bidir : STD_LOGIC;
 	SIGNAL ym_o_ioa : STD_LOGIC_VECTOR (7 DOWNTO 0);
 
@@ -195,6 +224,11 @@ ARCHITECTURE RTL OF telestrat IS
 	SIGNAL TWL_NMI : STD_LOGIC;
 	SIGNAL TWL_DO   : STD_LOGIC_VECTOR(7 DOWNTO 0);
 	SIGNAL CH376_DO : STD_LOGIC_VECTOR(7 DOWNTO 0);
+	SIGNAL CH376_EMU_DO : STD_LOGIC_VECTOR(7 DOWNTO 0);
+	SIGNAL CH376_PHY_DO : STD_LOGIC_VECTOR(7 DOWNTO 0);
+	SIGNAL CH376_EMU_SEL : STD_LOGIC;  -- the emulated CH376 answers at 0x340
+	SIGNAL CH376_EMU_CSn : STD_LOGIC;
+	SIGNAL CH376_PHY_ENA : STD_LOGIC;
 	SIGNAL BANK : STD_LOGIC_VECTOR(4 DOWNTO 0);
 
 	-- RTC
@@ -253,26 +287,25 @@ ARCHITECTURE RTL OF telestrat IS
 		);
 	END COMPONENT;
 
-	COMPONENT psg
+	COMPONENT ay_ym_psg
 		PORT (
+			ym : IN STD_LOGIC;
 			clock : IN STD_LOGIC;
+			sel : IN STD_LOGIC;
 			ce : IN STD_LOGIC;
 			reset : IN STD_LOGIC;
 			bdir : IN STD_LOGIC;
 			bc1 : IN STD_LOGIC;
-			sel : IN STD_LOGIC;
 			d : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 			q : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-
+			a : OUT UNSIGNED(11 DOWNTO 0);
+			b : OUT UNSIGNED(11 DOWNTO 0);
+			c : OUT UNSIGNED(11 DOWNTO 0);
+			mix : OUT UNSIGNED(14 DOWNTO 0);
 			ioad : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
 			ioaq : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
 			iobd : IN STD_LOGIC_VECTOR(7 DOWNTO 0);
-			iobq : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
-
-			MIX : OUT UNSIGNED (13 DOWNTO 0);
-			A : OUT UNSIGNED (11 DOWNTO 0);
-			B : OUT UNSIGNED(11 DOWNTO 0);
-			C : OUT UNSIGNED(11 DOWNTO 0)
+			iobq : OUT STD_LOGIC_VECTOR(7 DOWNTO 0)
 		);
 	END COMPONENT;
 	COMPONENT oric_ula IS
@@ -453,8 +486,9 @@ BEGIN
 		);
 
 	-- PSG
-	psg_a : psg
+	psg_a : ay_ym_psg
 	PORT MAP(
+		ym => PSG_YM,
 		clock => CLK_IN,
 		ce => ENA_1MHZ_N,
 		reset => RESETn,
@@ -465,7 +499,7 @@ BEGIN
 		a => PSG_OUT_A,
 		b => PSG_OUT_B,
 		c => PSG_OUT_C,
-		mix => PSG_OUT,
+		mix => psg_mix,
 
 		ioad => (OTHERS => 'Z'),
 		ioaq => ym_o_ioa,
@@ -474,6 +508,9 @@ BEGIN
 
 		sel => '1'
 	);
+	-- three 12 bit channels add up to 12285 at most, so 14 bits hold the mix
+	PSG_OUT <= psg_mix(13 DOWNTO 0);
+
 	inst_key : keyboard
 	PORT MAP(
 		clk_sys => CLK_IN,
@@ -491,7 +528,7 @@ BEGIN
 	KEYB_NMIn <= NOT swnmi;
 	KEYB_RESETn <= NOT swrst;
 
-	HCS3119 : work.HCS3119
+	HCS3119 : ENTITY work.HCS3119
 	PORT MAP(
 		CLK_SYS => CLK_IN,
 		PH2 => ula_PHI2,
@@ -527,7 +564,7 @@ BEGIN
 		nHOSTRST => RESETn -- RESET from MCU
 	);
 
-	HCS3120 : work.HCS3120
+	HCS3120 : ENTITY work.HCS3120
 	PORT MAP(
 		CLK_SYS => CLK_IN,
 		WD_CLK => WD_CLK,
@@ -586,7 +623,7 @@ BEGIN
 			VSYNC => VIDEO_VSYNC
 		);
 
-	inst_ACIA : work.ACIA
+	inst_ACIA : ENTITY work.ACIA
 	PORT MAP(
 		RESET => RESETn,
 		PHI2 => ENA_1MHZ,
@@ -634,22 +671,78 @@ BEGIN
 			DATA_OUT => RTC_DO
 		);
 		
-	ch376_inst : entity work.ch376_interface
-       port map (
-          clk     => clk_in,
-			 ph2     => ula_phi2,
-          reset_n => RESETn,
-          addr    => cpu_ad(15 downto 0),
-          data_in => cpu_do,
-          data_out => ch376_do,
-          data    => ch_d,
-          RnW     => cpu_rw,
-          cs340n  => cs340n,
-			 cs      => ch_cs,
-          wr      => ch_wr,
-          rd      => ch_rd,
-          a0      => ch_a0
-        );	
+	-- Backend selection. With both backends present the one not selected
+	-- sees no accesses: the emulated core gets no chip select and the bridge
+	-- keeps the CH_* bus idle.
+	CH376_EMU_SEL <= '1' WHEN CH376_BACKEND = 1 ELSE
+	                 CH376_VIRTUAL WHEN CH376_BACKEND = 2 ELSE
+	                 '0';
+	CH376_EMU_CSn <= CS340n OR NOT CH376_EMU_SEL;
+	CH376_PHY_ENA <= NOT CH376_EMU_SEL;
+	CH376_DO <= CH376_EMU_DO WHEN CH376_EMU_SEL = '1' ELSE CH376_PHY_DO;
+
+	gen_ch376_emulated : IF CH376_BACKEND /= 0 GENERATE
+		-- The 6502 commits its accesses on ENA_1MHZ_N (T65 Enable), so the
+		-- CH376 side effects happen once per access on the same enable.
+		ch376_core_inst : ENTITY work.ch376_core
+			PORT MAP (
+				CLK          => CLK_IN,
+				RESETn       => RESETn,
+				ENA          => ENA_1MHZ_N,
+				CSn          => CH376_EMU_CSn,
+				A0           => cpu_ad(0),
+				RnW          => cpu_rw,
+				DIN          => cpu_do,
+				DOUT         => CH376_EMU_DO,
+				SD_LBA       => SD_LBA,
+				SD_RD        => SD_RD,
+				SD_WR        => SD_WR,
+				SD_ACK       => SD_ACK,
+				SD_BUFF_ADDR => SD_BUFF_ADDR,
+				SD_BUFF_DOUT => SD_BUFF_DOUT,
+				SD_BUFF_WR   => SD_BUFF_WR,
+				SD_BUFF_DIN  => SD_BUFF_DIN,
+				IMG_MOUNTED  => IMG_MOUNTED,
+				IMG_SIZE     => IMG_SIZE
+			);
+	END GENERATE;
+
+	gen_ch376_no_emulated : IF CH376_BACKEND = 0 GENERATE
+		CH376_EMU_DO <= (OTHERS => '1');
+		SD_LBA       <= (OTHERS => '0');
+		SD_RD        <= '0';
+		SD_WR        <= '0';
+		SD_BUFF_DIN  <= (OTHERS => '0');
+	END GENERATE;
+
+	gen_ch376_bridge : IF CH376_BACKEND /= 1 GENERATE
+		ch376_inst : ENTITY work.ch376_interface
+			PORT MAP (
+				clk      => CLK_IN,
+				PH2      => ula_phi2,
+				reset_n  => RESETn,
+				ena      => CH376_PHY_ENA,
+				addr     => cpu_ad(15 DOWNTO 0),
+				data_in  => cpu_do,
+				data_out => CH376_PHY_DO,
+				data     => CH_D,
+				RnW      => cpu_rw,
+				cs340n   => CS340n,
+				cs       => CH_CS,
+				wr       => CH_WR,
+				rd       => CH_RD,
+				a0       => CH_A0
+			);
+	END GENERATE;
+
+	gen_ch376_no_bridge : IF CH376_BACKEND = 1 GENERATE
+		CH376_PHY_DO <= (OTHERS => '1');
+		CH_D  <= (OTHERS => 'Z');
+		CH_A0 <= '0';
+		CH_RD <= '1';
+		CH_WR <= '1';
+		CH_CS <= '1';
+	END GENERATE;
 		  
 		  
 	via1_pa_in <= (via1_pa_out AND NOT via1_pa_out_oe_l) OR (psg_do AND via1_pa_out_oe_l);
@@ -673,8 +766,22 @@ BEGIN
 	via2_pa_in <= NOT fire3_t1 & UART_RXD & NOT fire2_t1 & via2_pa_out(4) & '1' & via2_pa_out(2 DOWNTO 0);
 
 	rom_ad <= ROM_CSn & bank & cpu_ad (13 DOWNTO 0);
+	-- Only CPU writes to the banked area may reach the board SDRAM. Without this
+	-- qualification any write (zero page, stack, screen) made while a board RAM
+	-- bank was selected was mirrored into that bank using A13:0.
+	BANK_SEL <= '1' WHEN cpu_ad(15 DOWNTO 14) = "11" AND ula_MAPn = '1' ELSE '0';
+
+	-- Main RAM as decoded by the HCS10017 (CSRAMn) but without its PHI2
+	-- gating, so that the SDRAM address is settled before rom_rd and rom_wr
+	-- rise with PHI2: 0x0000-0xBFFF except page 3 with MAPn high, and the
+	-- overlay RAM at 0xC000-0xFFFF with MAPn low.
+	MAIN_RAM_SEL <= '1' WHEN (cpu_ad(15 DOWNTO 14) = "11" AND ula_MAPn = '0') OR
+	                         (cpu_ad(15 DOWNTO 14) /= "11" AND cpu_ad(15 DOWNTO 8) /= x"03" AND ula_MAPn = '1')
+	                ELSE '0';
+	ram_sel <= MAIN_RAM_SEL;
+
 	rom_rd <= cpu_rw AND ula_phi2;
-	rom_wr <= NOT cpu_rw AND ula_phi2;
+	rom_wr <= NOT cpu_rw AND ula_phi2 AND (BANK_SEL OR MAIN_RAM_SEL);
 	rom_q <= cpu_do;
 
 --process (CLK_IN)
@@ -724,7 +831,7 @@ BEGIN
 		TWL_DO   WHEN CS343n = '0' ELSE
 
 		RTC_DO WHEN CS360n = '0' ELSE -- placeholder for rtc
-		SRAM_DO WHEN ula_CSRAMn = '0' ELSE
+		ROM_D WHEN ula_CSRAMn = '0' ELSE  -- main RAM, from the SDRAM
 		ROM_D;
 	--			 CPU_DI_LAST;
 
