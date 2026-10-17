@@ -167,6 +167,7 @@ localparam CONF_STR = {
 	// (saved configurations stay valid)
 	"P1,System;",
 	"P1O23,CPU,6502,65C02,65C816;",
+	"P1OD,Joysticks,Normal,Swapped;",
 `ifdef USE_EXTBUS
 	"P1O7,CH376,Virtual,Real;",
 `endif
@@ -235,10 +236,15 @@ wire       reset = status[0] || buttons[1] || ~locked || ioctl_download || (cpu_
 
 wire [15:0] joy0;
 wire [15:0] joy1;
-wire  [4:0] joy_t0={joy0[3],joy0[2],joy0[4],joy0[1],joy0[0]}; //Up,Down,Fire,Left,Right
-wire  [4:0] joy_t1={joy1[3],joy1[2],joy1[4],joy1[1],joy1[0]};
-wire        fire2_t1=joy1[5]; 
-wire        fire3_t1=joy1[6]; 
+// joy_a goes to the right Telestrat port (PB7, with fire 2 and fire 3),
+// joy_b to the left one (PB6); the OSD can swap them
+wire        joy_swap = status[13];
+wire [15:0] joy_a = joy_swap ? joy1 : joy0;
+wire [15:0] joy_b = joy_swap ? joy0 : joy1;
+wire  [4:0] joy_t0={joy_a[3],joy_a[2],joy_a[4],joy_a[1],joy_a[0]}; //Up,Down,Fire,Left,Right
+wire  [4:0] joy_t1={joy_b[3],joy_b[2],joy_b[4],joy_b[1],joy_b[0]};
+wire        fire2_t1=joy_a[5];
+wire        fire3_t1=joy_a[6];
 wire        forced_scandoubler;
 wire [127:0] status;
 

@@ -264,6 +264,7 @@ ARCHITECTURE RTL OF telestrat IS
 	SIGNAL swnmi : STD_LOGIC;
 	SIGNAL swrst : STD_LOGIC;
 	SIGNAL joy_mux : STD_LOGIC_VECTOR(4 DOWNTO 0);
+	SIGNAL joy_sel0, joy_sel1 : STD_LOGIC_VECTOR(4 DOWNTO 0);
 
 	SIGNAL CPU1_DO : STD_LOGIC_VECTOR(7 DOWNTO 0);
 	SIGNAL CPU2_DO : STD_LOGIC_VECTOR(7 DOWNTO 0);
@@ -758,12 +759,16 @@ BEGIN
 	PRN_STROBE <= via1_pb_out(4);
 	PRN_DATA <= via1_pa_out;
 
-	joy_mux <= NOT joystick_0 WHEN via2_pb_out(7) = '1' ELSE
-		NOT joystick_1 WHEN via2_pb_out(6) = '1' ELSE
-		"11111";
+	-- Joystick ports on VIA2 (as Oricutron joystick.c): PB7 selects the right
+	-- port (joystick_0), PB6 the left one (joystick_1), both may be selected
+	-- and are then combined; PB0-PB4 read right, left, fire, down and up,
+	-- active low. Fire 2 and fire 3 of the right port go to PA7 and PA5.
+	joy_sel0 <= (OTHERS => via2_pb_out(7));
+	joy_sel1 <= (OTHERS => via2_pb_out(6));
+	joy_mux  <= NOT (joystick_0 AND joy_sel0) AND NOT (joystick_1 AND joy_sel1);
 
 	via2_pb_in <= NOT via2_pb_out(7) & via2_pb_out(6) & via2_pb_out(5) & joy_mux;
-	via2_pa_in <= NOT fire3_t1 & UART_RXD & NOT fire2_t1 & via2_pa_out(4) & '1' & via2_pa_out(2 DOWNTO 0);
+	via2_pa_in <= NOT (fire2_t1 AND via2_pb_out(7)) & UART_RXD & NOT (fire3_t1 AND via2_pb_out(7)) & via2_pa_out(4) & '1' & via2_pa_out(2 DOWNTO 0);
 
 	rom_ad <= ROM_CSn & bank & cpu_ad (13 DOWNTO 0);
 	-- Only CPU writes to the banked area may reach the board SDRAM. Without this
