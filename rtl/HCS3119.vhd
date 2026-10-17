@@ -149,7 +149,13 @@ begin
 						if count = 0 then
 							PH2_2 <= '1';
 						end if;
-						count := count + 1;
+						-- wrap at 5: without it synthesis made a 3 bit counter
+						-- wrapping at 8 (3 MHz) and simulation overflowed
+						if count = 5 then
+							count := 0;
+						else
+							count := count + 1;
+						end if;
 					END IF;
 				END PROCESS;
 				
