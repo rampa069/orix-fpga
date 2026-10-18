@@ -54,6 +54,12 @@
 // ends a read with the CRC error bit. It is off by default because images
 // made by old tools (the Sedoric 3 master among them) store F7 F7 instead of
 // the CRCs, and Oricutron never checks them.
+//
+// ready is the READY line of the drive. With ready high and no image mounted
+// the drive spins empty: there is no index pulse and no ID field, so Type II
+// and Type III commands wait, busy, until an image is mounted (then they go
+// on as with a disk just inserted) or a Force Interrupt ends them. The Oric
+// Microdisc boot ROM relies on this to stay on "insert system disc".
 
 module wd1793 #(
 	parameter STRICT_ID    = 0,        // 1: the ID track must match the track register
@@ -138,6 +144,7 @@ wd1793_dpram sbuf
 // Image geometry, read from the header on the first access after a mount
 reg  [23:0] disk_size = 0;
 reg         hdr_loaded = 0, hdr_valid = 0;
+wire        disk_in = |disk_size;   // an image is in the drive
 reg   [7:0] hdr_sides, hdr_tracks;
 
 wire        trk_exists = hdr_valid && (disk_track < hdr_tracks) && (!side || hdr_sides == 2);
@@ -328,11 +335,11 @@ end
 always @(posedge clk_sys) begin
 	integer cnt;
 	if(ce) begin
-		if(ready) begin
+		if(ready && disk_in) begin
 			if(cnt) cnt <= cnt - 1;
 				else cnt <= INDEX_PERIOD - 1;
 		end else cnt <= 0;
-		s_index <= ready && (cnt < INDEX_WIDTH);
+		s_index <= ready && disk_in && (cnt < INDEX_WIDTH);
 	end
 end
 
@@ -447,7 +454,9 @@ always @(posedge clk_sys) begin
 					if(!ready) begin
 						s_seekerr <= 1;
 						state <= STATE_ENDCOMMAND;
-					end else begin
+					end
+					else if(!disk_in) ; // empty drive: wait for an image
+					else begin
 						seektimer <= seektimer - 1'b1;
 						if(!seektimer) state <= STATE_SEARCH_CHK;
 					end
@@ -861,6 +870,7 @@ always @(posedge clk_sys) begin
 			STATE_RT:
 				begin
 					if(!ready) state <= STATE_ENDCOMMAND;
+					else if(!disk_in) ; // empty drive: wait for an image
 					else if(!hdr_loaded) begin
 						hdr_ret <= STATE_RT;
 						state   <= STATE_HDR;
@@ -918,6 +928,7 @@ always @(posedge clk_sys) begin
 			STATE_WT:
 				begin
 					if(!ready) state <= STATE_ENDCOMMAND;
+					else if(!disk_in) ; // empty drive: wait for an image
 					else if(!hdr_loaded) begin
 						hdr_ret <= STATE_WT;
 						state   <= STATE_HDR;
@@ -1206,7 +1217,8 @@ always @(posedge clk_sys) begin
 	end
 
 	// A new image invalidates the header and the track cache and ends any
-	// command in progress
+	// command in progress, except one still waiting for the disk or for the
+	// head to settle, which starts over on the new image
 	old_mounted <= img_mounted;
 	if(old_mounted && ~img_mounted) begin
 		disk_size   <= |img_size[31:24] ? 24'hFFFFFF : img_size[23:0];
@@ -1214,7 +1226,7 @@ always @(posedge clk_sys) begin
 		hdr_valid   <= 0;
 		cache_valid <= 0;
 		sec_idx     <= 0;
-		if(state != STATE_IDLE) begin
+		if(state != STATE_IDLE && state != STATE_SEARCH && state != STATE_RT && state != STATE_WT) begin
 			{sd_rd, sd_wr, sd_busy} <= 0;
 			scan_mode <= 0;
 			fsm_wr    <= 0;

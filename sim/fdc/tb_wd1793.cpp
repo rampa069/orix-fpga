@@ -188,9 +188,55 @@ int main(int argc, char **argv)
 	top->ready = 1; top->wp = 0; top->side = 0;
 	top->reset = 1; ticks(20); top->reset = 0; ticks(20);
 
+	// No image yet. With READY low a read ends at once with Not Ready.
+	top->ready = 0;
+	wr(2, 1);
+	{
+		int st = run_cmd(0x80, nullptr, nullptr, 1000000);
+		bool ok = st >= 0 && (st & 0x80);
+		printf("%s not ready: status %02X\n", ok ? "PASS" : "FAIL", st & 0xFF);
+		if(!ok) failures++;
+	}
+	// With READY high the drive spins empty: a read stays busy, with no
+	// index pulse, until Force Interrupt ends it.
+	top->ready = 1;
+	{
+		wr(0, 0x80);
+		ticks(4000000);   // a second at 4 MHz, five turns of a real disk
+		bool waiting = !top->intrq && top->busy;
+		wr(0, 0xD0);
+		ticks(100);
+		int st = rd(0);
+		bool ok = waiting && !top->busy && !(st & 0x02);
+		printf("%s empty drive waits, Force Interrupt ends it: status %02X\n", ok ? "PASS" : "FAIL", st);
+		if(!ok) failures++;
+	}
+	// A read issued on the empty drive goes on when an image is mounted,
+	// as with a disk inserted while the Microdisc ROM waits for it.
+	std::vector<uint8_t> first;
+	wr(0, 0x80);
+	ticks(400000);
+
 	// mount
 	top->img_size = img.size();
 	top->img_mounted = 1; tick(); top->img_mounted = 0; ticks(10);
+
+	{
+		uint64_t start = cycles;
+		while(!top->intrq && cycles - start < 400000000ull) {
+			if(top->drq) first.push_back(rd(3)); else tick();
+		}
+		int st = rd(0);
+		std::vector<sec> t0 = parse_track(0, 0);
+		const sec *s1 = nullptr;
+		for(auto &x : t0) if(x.r == 1) { s1 = &x; break; }
+		bool ok = s1 ? ((st & 0x1C) == 0 && first.size() == (size_t)(128 << s1->n) &&
+			!memcmp(first.data(), &img[s1->data], first.size()))
+			: (st & 0x10) != 0;
+		printf("%s read waiting for the disk goes on after the mount: status %02X, %zu bytes\n",
+			ok ? "PASS" : "FAIL", st, first.size());
+		if(!ok) failures++;
+	}
 
 	// Replay mode: a command sequence "cmd trackreg sector head side" per
 	// line (hex, hex, hex, dec, dec), as logged by sim/system/fdc_model.vhd
